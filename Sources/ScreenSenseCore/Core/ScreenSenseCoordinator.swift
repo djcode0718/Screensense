@@ -1,7 +1,8 @@
 import Foundation
 import Combine
+import AppKit
 
-/// Main Orchestrator for ScreenSense Phase 1
+/// Main Orchestrator for ScreenSense (Phase 1 & Phase 2)
 @MainActor
 public final class ScreenSenseCoordinator: ObservableObject {
     @Published public private(set) var state: ScreenSenseState = .idle
@@ -9,6 +10,8 @@ public final class ScreenSenseCoordinator: ObservableObject {
     @Published public private(set) var currentTranscript: String = ""
     @Published public private(set) var lastCommandDescription: String = ""
     @Published public private(set) var lastExecutionMessage: String = ""
+    @Published public private(set) var latestContext: VisibleContext?
+    @Published public private(set) var isBridgeRunning: Bool = false
 
     private let hotkeyManager: HotkeyManagerProtocol
     private let voiceManager: VoiceManagerProtocol
@@ -17,6 +20,10 @@ public final class ScreenSenseCoordinator: ObservableObject {
     private let clipboardManager: ClipboardManagerProtocol
     private let permissionManager: PermissionManagerProtocol
     private let audioFeedback: AudioFeedbackProtocol
+    private let screenCaptureProvider: ScreenCaptureProviderProtocol
+    private let browserBridge: BrowserBridgeProtocol
+    private let domContextProvider: DOMContextProviderProtocol
+    private let contextFusion: ContextFusionProtocol
 
     public init(
         hotkeyManager: HotkeyManagerProtocol = CarbonHotkeyManager(),
@@ -25,7 +32,10 @@ public final class ScreenSenseCoordinator: ObservableObject {
         pasteManager: PasteManagerProtocol = PasteManager(),
         clipboardManager: ClipboardManagerProtocol = SystemClipboardManager(),
         permissionManager: PermissionManagerProtocol = PermissionManager(),
-        audioFeedback: AudioFeedbackProtocol = SystemAudioFeedback()
+        audioFeedback: AudioFeedbackProtocol = SystemAudioFeedback(),
+        screenCaptureProvider: ScreenCaptureProviderProtocol = SCKScreenCaptureProvider(),
+        browserBridge: BrowserBridgeProtocol = LocalBrowserBridge(),
+        contextFusion: ContextFusionProtocol = ContextFusion()
     ) {
         self.hotkeyManager = hotkeyManager
         self.voiceManager = voiceManager
@@ -34,30 +44,49 @@ public final class ScreenSenseCoordinator: ObservableObject {
         self.clipboardManager = clipboardManager
         self.permissionManager = permissionManager
         self.audioFeedback = audioFeedback
+        self.screenCaptureProvider = screenCaptureProvider
+        self.browserBridge = browserBridge
+        self.domContextProvider = DOMContextProvider(bridge: browserBridge)
+        self.contextFusion = contextFusion
     }
 
     public func start() {
         ScreenSenseLogger.app.info("Starting ScreenSense Coordinator...")
         refreshPermissions()
         registerGlobalHotkey()
+        startBrowserBridge()
     }
 
     public func stop() {
         hotkeyManager.unregister()
         voiceManager.stopListening()
+        browserBridge.stop()
+        isBridgeRunning = false
         state = .idle
         ScreenSenseLogger.app.info("ScreenSense Coordinator stopped")
     }
 
+    public func startBrowserBridge() {
+        do {
+            try browserBridge.start()
+            isBridgeRunning = true
+            ScreenSenseLogger.app.info("Local browser bridge started successfully")
+        } catch {
+            isBridgeRunning = false
+            ScreenSenseLogger.app.error("Failed to start browser bridge: \(error.localizedDescription)")
+        }
+    }
+
     public func refreshPermissions() {
         self.permissionStatus = permissionManager.checkAllPermissions()
-        ScreenSenseLogger.permissions.info("Permissions status: Mic=\(self.permissionStatus.microphoneGranted), Speech=\(self.permissionStatus.speechRecognitionGranted), AX=\(self.permissionStatus.accessibilityGranted)")
+        ScreenSenseLogger.permissions.info("Permissions status: Mic=\(self.permissionStatus.microphoneGranted), Speech=\(self.permissionStatus.speechRecognitionGranted), AX=\(self.permissionStatus.accessibilityGranted), Screen=\(self.permissionStatus.screenRecordingGranted)")
     }
 
     public func requestAllPermissions() async {
         _ = await permissionManager.requestMicrophonePermission()
         _ = await permissionManager.requestSpeechRecognitionPermission()
         _ = permissionManager.requestAccessibilityPermission()
+        _ = permissionManager.requestScreenRecordingPermission()
         refreshPermissions()
     }
 
@@ -194,6 +223,48 @@ public final class ScreenSenseCoordinator: ObservableObject {
 
             scheduleStateReset(delay: 3.0)
         }
+    }
+
+    // MARK: - Phase 2: Screen Context Engine Methods
+
+    /// Captures a visual snapshot via ScreenCaptureKit
+    public func captureScreenOnly() async throws -> ScreenCaptureResult {
+        refreshPermissions()
+        guard permissionStatus.screenRecordingGranted else {
+            _ = permissionManager.requestScreenRecordingPermission()
+            throw ScreenCaptureError.permissionDenied
+        }
+
+        let result = try await screenCaptureProvider.captureCurrentContext()
+        let screenContext = contextFusion.fuse(dom: nil, screen: result)
+        self.latestContext = screenContext
+        return result
+    }
+
+    /// Fetches the latest DOM context sent from Chrome extension
+    public func fetchDOMContextOnly() async -> VisibleContext? {
+        let domContext = try? await domContextProvider.fetchCurrentDOMContext()
+        if let dom = domContext {
+            let fused = contextFusion.fuse(dom: dom, screen: nil)
+            self.latestContext = fused
+            return fused
+        }
+        return nil
+    }
+
+    /// Captures a unified context combining Chrome DOM and ScreenCaptureKit snapshot
+    public func captureUnifiedContext() async throws -> VisibleContext {
+        let dom = try? await domContextProvider.fetchCurrentDOMContext()
+
+        var screenResult: ScreenCaptureResult? = nil
+        if permissionManager.checkAllPermissions().screenRecordingGranted {
+            screenResult = try? await screenCaptureProvider.captureCurrentContext()
+        }
+
+        let unified = contextFusion.fuse(dom: dom, screen: screenResult)
+        self.latestContext = unified
+        ScreenSenseLogger.app.info("Unified context captured: \(unified.elements.count) elements, source: \(unified.source.rawValue)")
+        return unified
     }
 
     private func scheduleStateReset(delay: TimeInterval) {

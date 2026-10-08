@@ -24,7 +24,7 @@ cp Resources/Info.plist "$CONTENTS_DIR/Info.plist"
 
 # Ad-hoc code sign for local macOS execution & permission handling
 echo "==> Ad-hoc code signing $APP_NAME..."
-codesign --force --deep --sign - "$APP_DIR"
+codesign --force --deep --sign - --identifier "com.screensense.app" "$APP_DIR"
 
 echo "==> Built successfully at: $(pwd)/build/ScreenSense.app"
 echo "To launch, run:"

@@ -2,43 +2,33 @@ import SwiftUI
 import AppKit
 import ScreenSenseCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    let coordinator = ScreenSenseCoordinator()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Run as accessory / menu bar app (no dock icon clutter)
-        NSApp.setActivationPolicy(.accessory)
+        ScreenSenseLogger.app.info("ScreenSense launched via AppDelegate. Starting coordinator...")
+        coordinator.start()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        coordinator.stop()
     }
 }
 
 @main
 struct ScreenSenseApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var coordinator = ScreenSenseCoordinator()
 
     var body: some Scene {
-        MenuBarExtra {
-            MenuBarView(coordinator: coordinator)
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: menuBarIcon)
-                if coordinator.state.isListening {
-                    Text("Listening...")
-                        .font(.caption2)
-                }
-            }
+        MenuBarExtra("ScreenSense", systemImage: menuBarIcon) {
+            MenuBarView(coordinator: appDelegate.coordinator)
         }
         .menuBarExtraStyle(.window)
     }
 
-    init() {
-        // Coordinator will start when created
-        // We defer register to after app launches
-        DispatchQueue.main.async { [self] in
-            coordinator.start()
-        }
-    }
-
     private var menuBarIcon: String {
-        switch coordinator.state {
+        switch appDelegate.coordinator.state {
         case .idle:
             return "waveform"
         case .listening:

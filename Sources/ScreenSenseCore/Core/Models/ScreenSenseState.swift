@@ -34,19 +34,22 @@ public struct PermissionStatus: Equatable, Sendable {
     public let microphoneGranted: Bool
     public let speechRecognitionGranted: Bool
     public let accessibilityGranted: Bool
+    public let screenRecordingGranted: Bool
 
     public init(
         microphoneGranted: Bool = false,
         speechRecognitionGranted: Bool = false,
-        accessibilityGranted: Bool = false
+        accessibilityGranted: Bool = false,
+        screenRecordingGranted: Bool = false
     ) {
         self.microphoneGranted = microphoneGranted
         self.speechRecognitionGranted = speechRecognitionGranted
         self.accessibilityGranted = accessibilityGranted
+        self.screenRecordingGranted = screenRecordingGranted
     }
 
     public var allGranted: Bool {
-        microphoneGranted && speechRecognitionGranted && accessibilityGranted
+        microphoneGranted && speechRecognitionGranted && accessibilityGranted && screenRecordingGranted
     }
 
     public var missingPermissions: [String] {
@@ -54,6 +57,7 @@ public struct PermissionStatus: Equatable, Sendable {
         if !microphoneGranted { missing.append("Microphone") }
         if !speechRecognitionGranted { missing.append("Speech Recognition") }
         if !accessibilityGranted { missing.append("Accessibility") }
+        if !screenRecordingGranted { missing.append("Screen Recording") }
         return missing
     }
 }

@@ -58,12 +58,36 @@ public protocol PasteManagerProtocol: Sendable {
     func executePaste() throws
 }
 
+/// Protocol for ScreenCaptureKit screen capture
+public protocol ScreenCaptureProviderProtocol: AnyObject, Sendable {
+    func captureCurrentContext() async throws -> ScreenCaptureResult
+}
+
+/// Protocol for retrieving DOM context
+public protocol DOMContextProviderProtocol: AnyObject, Sendable {
+    func fetchCurrentDOMContext() async throws -> VisibleContext?
+}
+
+/// Protocol for fusing multiple context sources
+public protocol ContextFusionProtocol: Sendable {
+    func fuse(dom: VisibleContext?, screen: ScreenCaptureResult?) -> VisibleContext
+}
+
+/// Protocol for local communication bridge with browser extension
+public protocol BrowserBridgeProtocol: AnyObject, Sendable {
+    func start() throws
+    func stop()
+    var latestDOMContext: VisibleContext? { get }
+    var isConnected: Bool { get }
+}
+
 /// Protocol for managing and checking macOS permissions
 public protocol PermissionManagerProtocol: AnyObject, Sendable {
     func checkAllPermissions() -> PermissionStatus
     func requestMicrophonePermission() async -> Bool
     func requestSpeechRecognitionPermission() async -> Bool
     func requestAccessibilityPermission() -> Bool
+    func requestScreenRecordingPermission() -> Bool
     func openSystemSettings(for permission: SystemSettingsTarget)
 }
 
@@ -71,4 +95,5 @@ public enum SystemSettingsTarget: Sendable {
     case accessibility
     case microphone
     case speechRecognition
+    case screenRecording
 }

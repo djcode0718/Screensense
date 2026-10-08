@@ -91,6 +91,10 @@ final class MockPermissionManager: PermissionManagerProtocol, @unchecked Sendabl
         return status.accessibilityGranted
     }
 
+    func requestScreenRecordingPermission() -> Bool {
+        return status.screenRecordingGranted
+    }
+
     func openSystemSettings(for permission: SystemSettingsTarget) {}
 }
 

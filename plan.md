@@ -1,14 +1,16 @@
-# ScreenSense: Phase 1 Architecture & Implementation Plan
+# ScreenSense: Architecture & Implementation Plan
 
 ## 1. Executive Summary
 
-ScreenSense is a macOS-native voice-controlled screen interaction assistant. Phase 1 establishes the core foundation: listening for global hotkeys, capturing speech, deterministically parsing voice commands, and executing `⌘V` (paste) into the currently active macOS application.
+ScreenSense is a macOS-native voice-controlled screen interaction assistant.
+- **Phase 1** established the core application foundation: listening for global hotkeys, capturing speech, deterministically parsing voice commands, and executing `⌘V` (paste) into the currently active macOS application.
+- **Phase 2 (Screen Context Engine)** enables ScreenSense to answer: **"What content is currently visible to the user?"** via dual-channel acquisition: **Chrome Browser DOM** and native **macOS ScreenCaptureKit**, unified through a common `VisibleContext` model.
 
 ---
 
 ## 2. Architecture & Modular Structure
 
-ScreenSense is built with a modular, protocol-driven architecture to ensure zero tight-coupling and seamless extensibility for subsequent phases (such as multimodal screen context, LLM reasoning, or custom speech recognition engines).
+ScreenSense is built with a modular, protocol-driven architecture with zero tight coupling between sensory acquisition, platform bridges, and command processing.
 
 ```text
 ScreenSense/
@@ -17,27 +19,53 @@ ScreenSense/
 │   └── Info.plist              # Bundle metadata and TCC usage descriptions
 ├── scripts/
 │   └── build_app.sh            # Bundling and signing automation (.app)
+├── Extension/                  # Chrome Extension (Manifest V3)
+│   ├── manifest.json           # Extension permissions and background worker registration
+│   ├── icons/                  # 16px, 48px, 128px PNG icons
+│   ├── content/
+│   │   ├── visibility-analyzer.js # Precise viewport intersection and visibility percentage
+│   │   ├── dom-analyzer.js        # DOM traversal, semantic mapping, reading order sorting
+│   │   └── content.js             # Message dispatcher & local HTTP bridge sync
+│   ├── background/
+│   │   └── service-worker.js      # Active tab coordinator
+│   └── popup/
+│       ├── popup.html             # Extension connection and viewport element inspector
+│       └── popup.js               # Manual sync trigger & bridge status checker
+├── TestPage/
+│   └── index.html              # Comprehensive test page (10+ paragraphs, hidden nodes, live HUD)
 ├── Sources/
 │   ├── ScreenSenseCore/        # Core business logic and hardware abstractions
 │   │   ├── Core/
 │   │   │   ├── Models/         # ScreenSenseState, PermissionStatus
-│   │   │   ├── Protocols/      # Hotkey, Voice, Parser, Input, Clipboard, Permission protocols
+│   │   │   ├── Protocols/      # Hotkey, Voice, Parser, Input, Context, Bridge protocols
 │   │   │   ├── Utilities/      # Logger (os.Logger), StringNormalizer, SoundFeedback
 │   │   │   └── ScreenSenseCoordinator.swift # Central orchestrator & state machine
-│   │   ├── Hotkey/             # Carbon-based global hotkey manager
-│   │   ├── Voice/              # AppleSpeechRecognizer (SFSpeechRecognizer + AVAudioEngine) & VoiceManager
+│   │   ├── Context/            # Phase 2 Context Engine
+│   │   │   ├── Models/         # VisibleContext, VisibleElement, ElementBounds, ViewportInfo
+│   │   │   ├── DOMContextProvider.swift # DOM context provider via browser bridge
+│   │   │   └── ContextFusion.swift      # Context fusion layer (DOM + ScreenCaptureKit)
+│   │   ├── ScreenCapture/      # ScreenCaptureKit integration
+│   │   │   ├── ScreenCaptureResult.swift
+│   │   │   └── SCKScreenCaptureProvider.swift # Native on-demand screen capture
+│   │   ├── BrowserBridge/      # Local HTTP bridge for Chrome Extension (127.0.0.1:41920)
+│   │   │   └── LocalBrowserBridge.swift
+│   │   ├── Hotkey/             # Carbon-based global hotkey manager (⌥⇧Space)
+│   │   ├── Voice/              # AppleSpeechRecognizer (SFSpeechRecognizer + AVAudioEngine)
 │   │   ├── Commands/           # Deterministic parser and Command protocols (PasteCommand)
 │   │   ├── Clipboard/          # SystemClipboardManager (safe read-only inspection)
 │   │   ├── Input/              # CGEventInputSimulator & PasteManager (⌘V synthesis)
-│   │   └── Permissions/        # PermissionManager (Microphone, Speech Recognition, Accessibility)
+│   │   └── Permissions/        # PermissionManager (Mic, Speech, Accessibility, Screen Recording)
 │   └── ScreenSenseApp/         # Executable Target
 │       ├── App/                # ScreenSenseApp (@main SwiftUI App) & AppDelegate
-│       └── UI/                 # MenuBarView (SwiftUI status item popover & controls)
+│       └── UI/                 # MenuBarView (Voice Controls + Screen Context Developer Debug View)
 └── Tests/
-    └── ScreenSenseTests/       # Unit & Integration Tests (12 tests)
+    └── ScreenSenseTests/       # 20 Unit & Integration Tests
         ├── CommandParserTests.swift
         ├── PasteManagerTests.swift
-        └── CoordinatorTests.swift
+        ├── CoordinatorTests.swift
+        ├── ContextModelTests.swift
+        ├── ContextFusionTests.swift
+        └── LocalBrowserBridgeTests.swift
 ```
 
 ---
@@ -46,47 +74,73 @@ ScreenSense/
 
 | Component | Protocol | Responsibility |
 | :--- | :--- | :--- |
-| **`CarbonHotkeyManager`** | `HotkeyManagerProtocol` | Registers and handles system-wide global shortcut (`⌥⇧Space`) via Carbon Event HotKey APIs without polling. |
-| **`AppleSpeechRecognizer`** | `SpeechRecognizerProtocol` | Streams microphone audio via `AVAudioEngine` and transcodes speech to text via `SFSpeechRecognizer`. Pluggable for Whisper / local STT in future phases. |
-| **`VoiceManager`** | `VoiceManagerProtocol` | Orchestrates voice recording session lifecycle, audio feedback cues, and silence detection. |
-| **`DeterministicCommandParser`** | `CommandParserProtocol` | Normalizes spoken transcripts and matches command intents (e.g. `"paste"`, `"paste here"`, `"please paste"`) to structured `Command` objects. |
-| **`PasteManager`** | `PasteManagerProtocol` | High-level paste coordinator. |
-| **`CGEventInputSimulator`** | `InputSimulatorProtocol` | Emits native `⌘V` (`kVK_ANSI_V` with `.maskCommand`) key press/release events to the active focused application via `CGEvent`. |
-| **`SystemClipboardManager`** | `ClipboardManagerProtocol` | Safe clipboard inspection without mutating or logging sensitive contents. |
-| **`PermissionManager`** | `PermissionManagerProtocol` | Checks and triggers prompts for Microphone, Speech Recognition, and macOS Accessibility permissions. |
-| **`ScreenSenseCoordinator`** | `@MainActor ObservableObject` | Central coordinator wiring hotkeys, voice, parsing, input execution, and UI state notifications. |
+| **`SCKScreenCaptureProvider`** | `ScreenCaptureProviderProtocol` | On-demand single-frame capture via Apple's `ScreenCaptureKit` (`SCScreenshotManager`). Captures active display/window without continuous recording. |
+| **`LocalBrowserBridge`** | `BrowserBridgeProtocol` | Lightweight offline HTTP bridge on `127.0.0.1:41920` receiving `VisibleContext` payloads from the Chrome extension with full CORS support. |
+| **`DOMContextProvider`** | `DOMContextProviderProtocol` | Provides high-fidelity semantic DOM context extracted from the active browser tab. |
+| **`ContextFusion`** | `ContextFusionProtocol` | Merges structured DOM elements with visual ScreenCaptureKit confirmation into a unified `VisibleContext`. |
+| **`VisibilityAnalyzer` (JS)** | Content Script | Calculates element intersection with `[0, 0, innerWidth, innerHeight]`, visibility percentage (`0.0` - `1.0`), and filters hidden nodes. |
+| **`DOMAnalyzer` (JS)** | Content Script | Traverses DOM, maps semantic types (`heading`, `paragraph`, `code`, `button`, etc.), eliminates parent/child duplicates, and sorts in top-to-bottom reading order. |
+| **`CarbonHotkeyManager`** | `HotkeyManagerProtocol` | Registers and handles system-wide global shortcut (`⌥⇧Space`) via Carbon Event HotKey APIs. |
+| **`AppleSpeechRecognizer`** | `SpeechRecognizerProtocol` | Streams microphone audio via `AVAudioEngine` and transcodes speech to text via `SFSpeechRecognizer`. |
+| **`DeterministicCommandParser`** | `CommandParserProtocol` | Normalizes spoken transcripts and matches command intents (e.g. `"paste"`, `"paste here"`). |
+| **`PasteManager` & `CGEventInputSimulator`** | `PasteManagerProtocol` | Emits native `⌘V` key press/release events to the active focused application via `CGEvent`. |
+| **`ScreenSenseCoordinator`** | `@MainActor ObservableObject` | Central coordinator wiring hotkeys, voice, parsing, context acquisition, fusion, and UI state. |
 
 ---
 
-## 4. Design Decisions & Rationale
+## 4. Visible Element Detection Rules
 
-1. **Protocol-First Design for Pluggability**:
-   - Every major system is decoupled behind a Swift `protocol`. The speech recognizer (`SpeechRecognizerProtocol`) can be swapped for a local Whisper model in Phase 2 without changing the voice manager or parser.
-2. **Native Carbon Hotkeys**:
-   - Uses Carbon's `RegisterEventHotKey` for lightweight, event-driven global shortcuts that work across all applications without requiring Accessibility event tap interception or polling.
-3. **Deterministic Command Parsing (Phase 1)**:
-   - For Phase 1, an LLM is intentionally omitted. A deterministic parser handles variations like *"paste"*, *"paste here"*, *"please paste"*, *"paste this"*, and ignores conversational filler words.
-4. **Focused Native Paste Execution**:
-   - `PasteCommand` synthesizes `⌘V` using `CGEvent.post(tap: .cghidEventTap)` to send the standard paste shortcut to whatever window or input field currently has keyboard focus.
-5. **Swift Concurrency & Thread Safety**:
-   - Full Swift 6 strict concurrency compliance (`Sendable` annotations, `@MainActor` state management, actor-safe closures).
+The context engine adheres to the following rules to extract **what is visible in the current viewport**:
 
----
-
-## 5. Permissions Architecture
-
-ScreenSense requires three macOS permissions:
-1. **Microphone (`NSMicrophoneUsageDescription`)**: Required by `AVAudioEngine` to capture user voice.
-2. **Speech Recognition (`NSSpeechRecognitionUsageDescription`)**: Required by `SFSpeechRecognizer` to convert audio buffers to transcripts.
-3. **Accessibility**: Required by `CGEvent.post` to synthesize `⌘V` keystrokes to external focused applications.
-
-The UI provides instant visual badges for each permission status and one-click actions to open the specific System Settings pane.
+1. **Structural Hiddenness**:
+   - Elements with computed `display: none`, `visibility: hidden`, `opacity: 0`, `[hidden]`, or `[aria-hidden="true"]` are strictly excluded.
+2. **Zero Dimension Filter**:
+   - Elements with `width === 0` or `height === 0` are excluded.
+3. **Viewport Intersection Geometry**:
+   - `visibleWidth = max(0, min(viewportWidth, rect.right) - max(0, rect.left))`
+   - `visibleHeight = max(0, min(viewportHeight, rect.bottom) - max(0, rect.top))`
+   - `visibleArea = visibleWidth * visibleHeight`
+   - `visibilityPercentage = visibleArea / (rect.width * rect.height)`
+   - Elements scrolled above or below the viewport (`visibleArea <= 0` or `visibilityPercentage < 0.02`) are filtered out.
+4. **Spatial Reading Order**:
+   - Elements are sorted primarily by vertical position (`bounds.y` ascending), secondary by horizontal position (`bounds.x` ascending).
+5. **Deduplication of Nested Containers**:
+   - Parent containers (`<article>`, `<section>`, `<div>`) whose text content is entirely composed of child paragraphs/headings are skipped to avoid duplicate textual nodes.
 
 ---
 
-## 6. How Phase 1 Fits into the Future Architecture
+## 5. Context Fusion Architecture
 
-Phase 1 provides the sensory (voice/hotkey) and motor (keystroke/paste) foundation. In later phases:
-- **Phase 2 (Multimodal / Screen Context)**: Add screen capture and OCR/accessibility tree extraction into the `CommandExecutionContext`.
-- **Phase 3 (LLM & Complex Intents)**: Swap or augment `CommandParserProtocol` with an LLM-based intent resolver (`Copy`, `Select`, `Explain`, `Find`, `Fill Form`).
-- **Phase 4 (Local Offline STT)**: Add `WhisperSpeechRecognizer` implementing `SpeechRecognizerProtocol`.
+```text
+[ Chrome Extension Content Script ]
+               │
+               ▼ (POST /api/context on 127.0.0.1:41920)
+       [ LocalBrowserBridge ] ──► [ DOMContextProvider ]
+                                             │
+[ SCKScreenCaptureProvider ] ────────────────┼──► [ ContextFusion ] ──► [ Unified VisibleContext ]
+ (ScreenCaptureKit On-Demand)                │                                 │
+                                                                               ▼
+                                                                  [ ScreenSenseCoordinator ]
+                                                                               │
+                                                                  [ MenuBar Developer View ]
+```
+
+- **When DOM context is available**: The unified context uses exact semantic DOM elements, spatial bounding rects, and attaches the ScreenCaptureKit visual screenshot as confirmation.
+- **When DOM is unavailable (e.g. non-browser application)**: ScreenCaptureKit provides visual context with display resolution and window metadata, establishing the fallback foundation for Phase 3 OCR/Vision.
+
+---
+
+## 6. Permissions Architecture
+
+1. **Microphone (`NSMicrophoneUsageDescription`)**: Required by `AVAudioEngine` for voice input.
+2. **Speech Recognition (`NSSpeechRecognitionUsageDescription`)**: Required by `SFSpeechRecognizer` for speech-to-text.
+3. **Accessibility**: Required by `CGEvent.post` to synthesize `⌘V` keystrokes.
+4. **Screen Recording**: Required by `ScreenCaptureKit` (`SCScreenshotManager`) for visual screen context capture.
+
+---
+
+## 7. Roadmap & Phase Progression
+
+- **Phase 1 (Complete)**: macOS application foundation, global hotkey, voice recognition, command parser, paste execution.
+- **Phase 2 (Complete)**: Screen Context Engine, Chrome Extension DOM viewport extraction, ScreenCaptureKit on-demand capture, Context Fusion, developer debug UI.
+- **Phase 3 (Next)**: Local OCR / Vision engine, Multimodal LLM reasoning, context-aware commands (`Copy`, `Select`, `Explain`, `Find`).

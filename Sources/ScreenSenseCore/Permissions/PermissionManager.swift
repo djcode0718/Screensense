@@ -11,11 +11,13 @@ public final class PermissionManager: PermissionManagerProtocol, @unchecked Send
         let micGranted = checkMicrophone()
         let speechGranted = checkSpeechRecognition()
         let axGranted = checkAccessibility()
+        let screenGranted = checkScreenRecording()
 
         return PermissionStatus(
             microphoneGranted: micGranted,
             speechRecognitionGranted: speechGranted,
-            accessibilityGranted: axGranted
+            accessibilityGranted: axGranted,
+            screenRecordingGranted: screenGranted
         )
     }
 
@@ -61,7 +63,9 @@ public final class PermissionManager: PermissionManagerProtocol, @unchecked Send
     }
 
     public func checkAccessibility() -> Bool {
-        return AXIsProcessTrusted()
+        let promptKey = "AXTrustedCheckOptionPrompt" as CFString
+        let options = [promptKey: false] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
     }
 
     public func requestAccessibilityPermission() -> Bool {
@@ -73,6 +77,17 @@ public final class PermissionManager: PermissionManagerProtocol, @unchecked Send
         return isTrusted
     }
 
+    public func checkScreenRecording() -> Bool {
+        return CGPreflightScreenCaptureAccess()
+    }
+
+    public func requestScreenRecordingPermission() -> Bool {
+        ScreenSenseLogger.permissions.info("Requesting screen recording permission...")
+        let granted = CGRequestScreenCaptureAccess()
+        ScreenSenseLogger.permissions.info("Screen recording granted: \(granted)")
+        return granted
+    }
+
     public func openSystemSettings(for target: SystemSettingsTarget) {
         let urlString: String
         switch target {
@@ -82,6 +97,8 @@ public final class PermissionManager: PermissionManagerProtocol, @unchecked Send
             urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
         case .speechRecognition:
             urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+        case .screenRecording:
+            urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         }
 
         if let url = URL(string: urlString) {

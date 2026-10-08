@@ -27,8 +27,10 @@ public final class CGEventInputSimulator: InputSimulatorProtocol, @unchecked Sen
     public init() {}
 
     public func simulatePasteShortcut() throws {
-        // Verify accessibility trust
-        guard AXIsProcessTrusted() else {
+        // Verify accessibility trust in real-time
+        let promptKey = "AXTrustedCheckOptionPrompt" as CFString
+        let options = [promptKey: false] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options) else {
             ScreenSenseLogger.input.error("Accessibility permission missing when attempting to post ⌘V")
             throw InputSimulationError.accessibilityPermissionRequired
         }

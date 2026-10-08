@@ -1,19 +1,17 @@
 # ScreenSense: Walkthrough & User Guide
 
-This guide describes how to build, run, grant permissions, and test ScreenSense Phase 1.
+This guide describes how to build, run, load the Chrome extension, grant permissions, and test both Phase 1 (Voice/Paste) and Phase 2 (Screen Context Engine).
 
 ---
 
 ## 1. Building the Project
 
-You can build the project using Swift Package Manager:
-
 ### Development Build & Test Suite
 ```bash
-# Activate conda environment if preferred
+# Optional: Activate conda environment
 conda activate screensense-env
 
-# Run automated tests
+# Run all 20 automated unit tests
 swift test
 
 # Build debug binary
@@ -21,8 +19,6 @@ swift build
 ```
 
 ### Packaging as a macOS App Bundle (.app)
-macOS requires an `.app` bundle with `Info.plist` for system permission prompts (Microphone and Speech Recognition). A packaging script is provided:
-
 ```bash
 ./scripts/build_app.sh
 ```
@@ -30,101 +26,102 @@ This produces `build/ScreenSense.app` signed for local execution.
 
 ---
 
-## 2. Running ScreenSense
+## 2. Installing the Chrome Extension
+
+1. Open Google Chrome.
+2. Navigate to `chrome://extensions`.
+3. Enable **Developer mode** (toggle in top right).
+4. Click **"Load unpacked"** in the top left.
+5. Select the `Extension` directory from this repository:
+   ```text
+   /Users/sj/Documents/Screensense/Extension
+   ```
+6. The **ScreenSense Browser Bridge** extension will now be loaded with its icon in the Chrome toolbar.
+
+---
+
+## 3. Running ScreenSense
 
 Run the packaged application:
 ```bash
 open build/ScreenSense.app
 ```
 
-Alternatively, you can run directly from SPM:
-```bash
-swift run ScreenSense
-```
-
 ScreenSense will launch as a menu bar accessory (look for the waveform icon 🎙️ in your macOS top menu bar).
 
 ---
 
-## 3. Granting Permissions
+## 4. Granting & Verifying System Permissions
 
-Click on the ScreenSense menu bar icon to open the status popup. You will see the **System Permissions** checklist:
+Click the ScreenSense menu bar icon to open the status popup. The checklist shows real-time status without caching stale permissions:
 
-1. **Microphone**: Click **"Request All Permissions"** or grant in **System Settings → Privacy & Security → Microphone**.
+1. **Microphone**: Click **"Request Permissions"** or grant in **System Settings → Privacy & Security → Microphone**.
 2. **Speech Recognition**: Grant when prompted or in **System Settings → Privacy & Security → Speech Recognition**.
-3. **Accessibility**: Click **"Open Settings"** next to Accessibility, unlock settings, and toggle **ScreenSense** (or your terminal application if running via `swift run`) ON in **System Settings → Privacy & Security → Accessibility**.
+3. **Accessibility**: Click **"Settings"** and toggle **ScreenSense** ON in **System Settings → Privacy & Security → Accessibility** (for `⌘V` paste simulation). Then click **"Refresh"** in the menu bar popover to immediately re-query `AXIsProcessTrustedWithOptions` and observe the badge turn to ✅.
+4. **Screen Recording**: Click **"Settings"** and toggle **ScreenSense** ON in **System Settings → Privacy & Security → Screen Recording** (for ScreenCaptureKit capture). Click **"Refresh"** to verify.
 
 ---
 
-## 4. Manual Testing Checklist
+## 5. Phase 2 Verification & Manual Testing
 
-### Test Case 1: Primary Paste Flow in External App
-1. Open **TextEdit** (or any text editor).
-2. Type some text, e.g., `Hello from ScreenSense!`.
-3. Select and copy it (`⌘C`).
-4. Move your cursor to a blank line.
-5. Press the ScreenSense global shortcut: **`⌥ ⇧ Space`** (Option + Shift + Space).
-6. Listen for the start audio cue (`Tink`) and see the menu bar icon turn red (🔴).
-7. Speak clearly: **`paste`** (or `please paste`, `paste here`).
-8. **Verification**:
-   - Audio feedback (`Glass`) plays.
-   - ScreenSense synthesizes `⌘V`.
-   - The clipboard contents appear at the active cursor in TextEdit.
+### Test Case 1: Viewport DOM Extraction with Test Page
+1. Open the included test page in Chrome:
+   ```bash
+   open -a "Google Chrome" TestPage/index.html
+   ```
+2. Scroll to the middle of the page (e.g., Section 2 or Section 3).
+3. Observe the bottom-right **ScreenSense Live HUD** updating visible element counts dynamically.
+4. Open the **ScreenSense** menu bar popover and switch to the **"Screen Context (Debug)"** tab.
+5. Click **"Fetch DOM"** or **"Fusion"**.
+6. **Verification**:
+   - The UI displays: `Source: UNIFIED` (or `DOM`).
+   - The element list shows only elements currently inside the viewport (e.g. Paragraphs 4–6), in top-to-bottom reading order.
+   - Visibility percentages (e.g., `100% visible`, `75% visible`) match the viewport intersection.
+   - Elements with `display: none`, `visibility: hidden`, `opacity: 0`, and zero dimensions are **not** present in the list.
 
-### Test Case 2: Global Shortcut from Another Active App
-1. Focus Safari, Terminal, or Slack.
-2. Ensure ScreenSense is running in the background.
-3. Place cursor in an input box or text field.
-4. Press **`⌥ ⇧ Space`** and say **`paste here`**.
-5. **Verification**: ScreenSense triggers, parses the command, and pastes the text directly into the active field without switching focus away.
+### Test Case 2: Wikipedia Real-World Viewport Test
+1. Open any Wikipedia article (e.g., [https://en.wikipedia.org/wiki/Swift_(programming_language)](https://en.wikipedia.org/wiki/Swift_(programming_language))).
+2. Scroll to a specific section (e.g., "History" or "Features").
+3. Click **"Fetch DOM"** or **"Fusion"** in the ScreenSense menu bar view.
+4. **Verification**:
+   - ScreenSense extracts exactly the visible headings, paragraphs, and list items.
+   - Spatial ordering matches the page's visual layout.
 
-### Test Case 3: Unsupported Command Handling
-1. Press **`⌥ ⇧ Space`**.
-2. Say: **`open browser`**.
+### Test Case 3: ScreenCaptureKit On-Demand Capture
+1. In the ScreenSense menu bar popover, switch to **"Screen Context (Debug)"**.
+2. Click **"Capture Screen"**.
 3. **Verification**:
-   - ScreenSense acknowledges transcript `"open browser"`.
-   - Error sound (`Basso`) plays.
-   - Menu bar status shows: `Error: Command not recognized: "open browser"`.
-   - No keystrokes are simulated.
+   - ScreenCaptureKit captures the main display/active window.
+   - A visual thumbnail appears in the menu bar popover under "Visual Confirmation".
+   - Resolution and active application metadata are updated.
+
+### Test Case 4: Phase 1 Voice Paste Regression
+1. Open **TextEdit**, type `ScreenSense Paste Test`, copy it (`⌘C`).
+2. Move cursor to a blank line.
+3. Press **`⌥ ⇧ Space`** and say **`paste`**.
+4. **Verification**: `⌘V` is synthesized and text appears at cursor.
 
 ---
 
-## 5. Automated Test Suite
+## 6. Automated Test Suite
 
 Run the full automated test suite:
 ```bash
 swift test
 ```
 
-### Test Coverage Summary:
-- **`CommandParserTests`**:
-  - `testStringNormalization`: Punctuation stripping, lowercase normalization, whitespace trimming.
-  - `testPasteCommandParsing`: Exact matches (`"paste"`, `"Paste"`, `"PASTE"`).
-  - `testPasteVariationsParsing`: Natural language variations (`"paste here"`, `"please paste"`, `"paste this"`, `"screensense paste"`).
-  - `testEmptyTranscript`: Handling empty strings and silence.
-  - `testUnsupportedCommands`: Verification that unrecognized intents reject safely.
-- **`PasteManagerTests`**:
-  - `testPasteManagerSuccess`: Mocked `InputSimulatorProtocol` verifying `⌘V` trigger.
-  - `testPasteManagerErrorPropagation`: Graceful handling of missing Accessibility permissions.
-  - `testPasteCommandExecutionThroughContext`: End-to-end command context execution.
-- **`CoordinatorTests`**:
-  - `testCoordinatorStartAndHotkeyTrigger`: Global hotkey registration & trigger dispatch.
-  - `testCoordinatorVoiceToPasteExecutionFlow`: Full simulated voice → transcript → command → paste flow.
-  - `testCoordinatorUnsupportedCommandFlow`: Safe failure state on unsupported voice input.
-  - `testCoordinatorMissingPermissionsBlocked`: Safety block when permissions are not granted.
+### Test Coverage Summary (20 Tests):
+- **`ContextModelTests`**: JSON serialization/deserialization of `VisibleContext`, spatial reading order sorting (`spatiallySortedElements`), and type-based filtering.
+- **`ContextFusionTests`**: Fusion logic for DOM only, ScreenCaptureKit only, and unified multimodal combination.
+- **`LocalBrowserBridgeTests`**: Local HTTP bridge context propagation and `DOMContextProvider` delegation.
+- **`CommandParserTests`**: Spoken text normalization, exact `"paste"` matching, natural language variations (`"paste here"`, `"please paste"`), and unsupported command rejection.
+- **`PasteManagerTests`**: Keystroke simulation abstraction, error propagation on missing Accessibility permissions, and context execution.
+- **`CoordinatorTests`**: End-to-end hotkey registration, voice session lifecycle, and state machine transitions.
 
 ---
 
-## 6. Known Limitations (Phase 1 Scope)
+## 7. Known Limitations (Phase 2 Scope)
 
-- Only deterministic commands are supported (e.g., `paste`, `paste here`, `please paste`).
-- Advanced commands requiring visual context or LLMs (e.g., "click the submit button", "summarize this page") are deferred to later phases.
-- If Accessibility permission is revoked by the OS, `⌘V` synthesis fails with an explicit error prompt instructing the user to grant permission.
-
----
-
-## 7. Recommended Next Steps for Phase 2
-
-1. **Multimodal Screen Perception**: Add screen snapshot capture (`CGDisplayStream` / `ScreenCaptureKit`) when the hotkey is triggered.
-2. **Pluggable Local Whisper Engine**: Integrate `whisper.cpp` / CoreML Whisper as an alternative implementation of `SpeechRecognizerProtocol` for completely offline speech recognition.
-3. **Context-Aware Commands**: Introduce `CopyCommand`, `SelectCommand`, and OCR text extraction.
+- DOM extraction requires Google Chrome with the ScreenSense unpacked extension loaded.
+- For non-browser apps, context is captured via ScreenCaptureKit (ready for Phase 3 OCR/Vision processing).
+- The Developer Debug View in the menu bar is for inspection/validation in Phase 2; the final user-facing overlay will be built in later phases.
