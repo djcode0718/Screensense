@@ -166,5 +166,10 @@ class DOMAnalyzer {
   }
 }
 
-// Expose globally for content scripts
-window.ScreenSenseDOMAnalyzer = DOMAnalyzer;
+// Expose globally for content scripts and test environments
+if (typeof window !== 'undefined') {
+  window.ScreenSenseDOMAnalyzer = DOMAnalyzer;
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = DOMAnalyzer;
+}

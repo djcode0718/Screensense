@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ScreenSense Phase 2 Context Engine Test Page</title>
+  <title>ScreenSense Copy Command Test Page</title>
   <style>
     :root {
       --primary: #2563eb;
@@ -18,214 +18,135 @@
       line-height: 1.6;
       color: var(--text);
       background: var(--bg);
-      padding-bottom: 300px;
+      padding: 40px 20px;
     }
     .container {
-      max-width: 800px;
+      max-width: 720px;
       margin: 0 auto;
-      padding: 30px 20px;
+      background: var(--card);
+      padding: 36px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
     header {
-      margin-bottom: 30px;
+      margin-bottom: 24px;
       border-bottom: 2px solid var(--border);
-      padding-bottom: 20px;
+      padding-bottom: 16px;
     }
-    h1 { font-size: 2.2rem; color: #1e3a8a; margin-bottom: 8px; }
-    h2 { font-size: 1.5rem; color: #1e40af; margin-top: 32px; margin-bottom: 12px; }
-    h3 { font-size: 1.2rem; color: #1d4ed8; margin-top: 24px; margin-bottom: 8px; }
-    p { margin-bottom: 16px; font-size: 1.05rem; }
-    blockquote {
-      border-left: 4px solid var(--primary);
-      padding: 12px 16px;
+    h1 { font-size: 1.8rem; color: #1e3a8a; margin-bottom: 6px; }
+    .subtitle { font-size: 0.95rem; color: #64748b; margin-bottom: 12px; }
+    
+    .target-box {
       background: #eff6ff;
-      margin: 20px 0;
-      font-style: italic;
+      border-left: 4px solid var(--primary);
+      padding: 20px;
       border-radius: 0 8px 8px 0;
+      margin: 24px 0;
     }
-    pre {
-      background: #1e293b;
-      color: #f8fafc;
-      padding: 16px;
-      border-radius: 8px;
-      overflow-x: auto;
-      margin: 20px 0;
+    .target-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 8px;
     }
-    ul, ol { margin-left: 24px; margin-bottom: 16px; }
-    li { margin-bottom: 6px; }
-    .btn-group { display: flex; gap: 10px; margin: 20px 0; }
-    button {
-      padding: 10px 18px;
-      background: var(--primary);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
+    p#test-paragraph {
+      font-size: 1.15rem;
+      font-weight: 500;
+      color: #1e293b;
+      margin: 0;
     }
-    button:hover { background: #1d4ed8; }
 
-    /* Sticky Inspector HUD */
+    .instructions {
+      background: #f1f5f9;
+      padding: 18px;
+      border-radius: 8px;
+      margin-top: 24px;
+      font-size: 0.9rem;
+    }
+    .instructions ol {
+      margin-left: 20px;
+      margin-top: 8px;
+    }
+    .instructions li {
+      margin-bottom: 6px;
+    }
+    .shortcut {
+      display: inline-block;
+      padding: 2px 6px;
+      background: #e2e8f0;
+      border-radius: 4px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.85rem;
+      font-weight: bold;
+    }
+
+    /* Live HUD for visual confirmation */
     .hud {
       position: fixed;
       bottom: 20px;
       right: 20px;
-      width: 320px;
-      background: rgba(15, 23, 42, 0.92);
+      width: 280px;
+      background: rgba(15, 23, 42, 0.9);
       backdrop-filter: blur(8px);
       color: #ffffff;
-      padding: 16px;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
-      z-index: 1000;
+      padding: 12px 16px;
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
       font-size: 12px;
+      z-index: 1000;
     }
-    .hud-title { font-weight: bold; font-size: 13px; margin-bottom: 8px; color: #60a5fa; display: flex; justify-content: space-between; }
-    .hud-list { max-height: 180px; overflow-y: auto; margin-top: 8px; }
-    .hud-item { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
-    .hud-pct { color: #4ade80; font-weight: bold; float: right; }
-
-    /* Test Cases Visual Badges */
-    .test-badge {
-      display: inline-block;
-      font-size: 0.75rem;
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
       font-weight: bold;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: #e2e8f0;
-      color: #475569;
-      margin-right: 6px;
-      text-transform: uppercase;
+      color: #60a5fa;
+      margin-bottom: 4px;
     }
-
-    /* Intentionally hidden elements for testing */
-    .hidden-by-display { display: none; }
-    .hidden-by-visibility { visibility: hidden; }
-    .hidden-by-opacity { opacity: 0; }
-    .zero-dim { width: 0; height: 0; overflow: hidden; }
   </style>
 </head>
 <body>
 
-  <!-- Sticky HUD displaying live visible DOM element detection -->
   <div class="hud">
-    <div class="hud-title">
-      <span>ScreenSense Live HUD</span>
-      <span id="hudCount">0 visible</span>
+    <div class="hud-header">
+      <span>ScreenSense Test HUD</span>
+      <span id="hudCount">1 paragraph</span>
     </div>
-    <div>Scroll to see viewport visibility changes:</div>
-    <div class="hud-list" id="hudElements"></div>
+    <div id="hudDesc">Status: Ready for Voice Copy</div>
   </div>
 
   <div class="container">
     <header>
-      <h1>ScreenSense Context Engine Test Suite</h1>
-      <p>This test page evaluates viewport-based DOM visibility filtering, bounding geometry, reading order preservation, and exclusion of hidden elements.</p>
+      <h1>ScreenSense Copy Test</h1>
+      <div class="subtitle">Controlled Single-Paragraph Validation Page</div>
     </header>
 
-    <section>
-      <h2><span class="test-badge">Section 1</span>The Architecture of Screen Interaction</h2>
-      <p id="p-1"><span class="test-badge">Paragraph 1</span>Human-computer interaction has evolved through discrete paradigm shifts: from command-line teletypes and textual menus to graphical desktop environments with mice and multi-touch displays. Today, multimodal voice and visual interfaces represent the next major evolution.</p>
-
-      <p id="p-2"><span class="test-badge">Paragraph 2</span>ScreenSense introduces an on-demand screen context engine that operates across all macOS applications. Rather than continuously recording user screens or scraping full background DOMs, it pinpoints exactly what the user is looking at in the current viewport.</p>
-
-      <blockquote>
-        "The most powerful assistant is one that understands visual spatial context without adding friction or violating privacy."
-      </blockquote>
-
-      <p id="p-3"><span class="test-badge">Paragraph 3</span>By combining Apple's high-performance ScreenCaptureKit framework with structured Chrome DOM extraction, ScreenSense captures both high-fidelity visual context and semantic textual data.</p>
-    </section>
-
-    <!-- HIDDEN ELEMENTS SECTION: These MUST NOT be returned in VisibleContext -->
-    <div class="hidden-by-display" id="hidden-display-p">
-      <p>FAIL: This paragraph has display: none and should NEVER appear in VisibleContext.</p>
-    </div>
-    <div class="hidden-by-visibility" id="hidden-vis-p">
-      <p>FAIL: This paragraph has visibility: hidden and should NEVER appear in VisibleContext.</p>
-    </div>
-    <div class="hidden-by-opacity" id="hidden-op-p">
-      <p>FAIL: This paragraph has opacity: 0 and should NEVER appear in VisibleContext.</p>
-    </div>
-    <div hidden id="hidden-attr-p">
-      <p>FAIL: This paragraph has the HTML hidden attribute.</p>
-    </div>
-    <div aria-hidden="true" id="hidden-aria-p">
-      <p>FAIL: This paragraph has aria-hidden="true".</p>
-    </div>
-    <div class="zero-dim" id="zero-dim-p">
-      <p>FAIL: This element has zero width and height.</p>
+    <div class="target-box">
+      <div class="target-label">Target Paragraph:</div>
+      <!-- Exactly ONE visible paragraph on the page -->
+      <p id="test-paragraph">This is the ScreenSense copy test paragraph.</p>
     </div>
 
-    <section>
-      <h2><span class="test-badge">Section 2</span>Visible Element Detection Rules</h2>
-      <p id="p-4"><span class="test-badge">Paragraph 4</span>The viewport visibility analyzer follows strict geometric rules. When an element is positioned outside the current window scroll coordinates, it is excluded from the active context payload.</p>
-
-      <div class="btn-group">
-        <button id="btn-primary" onclick="alert('Action triggered')">Execute Action</button>
-        <button id="btn-secondary" style="background:#64748b;">Inspect Context</button>
-      </div>
-
-      <p id="p-5"><span class="test-badge">Paragraph 5</span>When an element intersects the viewport boundary, ScreenSense calculates the exact visible percentage. For instance, an element halfway off the bottom edge receives a 50% visibility score.</p>
-
-      <pre><code>// Common Context Model
-struct VisibleContext {
-    let source: ContextSource
-    let viewport: ViewportInfo
-    let elements: [VisibleElement]
-}</code></pre>
-    </section>
-
-    <section>
-      <h2><span class="test-badge">Section 3</span>Deeply Scrolled Content</h2>
-      <p id="p-6"><span class="test-badge">Paragraph 6</span>As users scroll down the page, elements previously visible scroll above the viewport and are automatically filtered out. Only elements residing in the active viewport rectangle are transmitted.</p>
-
-      <ul id="feature-list">
-        <li id="li-1"><strong>Deterministic parsing:</strong> Instant command matching without LLM latency.</li>
-        <li id="li-2"><strong>Dual-channel context:</strong> Seamless fusion of DOM and ScreenCaptureKit.</li>
-        <li id="li-3"><strong>Spatial ordering:</strong> Elements preserve top-to-bottom reading sequence.</li>
-      </ul>
-
-      <p id="p-7"><span class="test-badge">Paragraph 7</span>Consider an article with 100 paragraphs. When the user scrolls to paragraph 47, ScreenSense reports paragraphs 47 through 50 as Visible Paragraphs 1 through 4, preserving spatial alignment.</p>
-
-      <p id="p-8"><span class="test-badge">Paragraph 8</span>Furthermore, nested elements avoid redundant duplicate parent strings, ensuring that each sentence or block corresponds to its specific bounding rectangle.</p>
-    </section>
-
-    <section>
-      <h2><span class="test-badge">Section 4</span>Advanced Interactive Nodes</h2>
-      <p id="p-9"><span class="test-badge">Paragraph 9</span>Form inputs and interactive components are also tracked with their current value or placeholder text, providing rich multimodal interaction opportunities in future phases.</p>
-
-      <div style="margin: 20px 0;">
-        <label for="sample-input" style="font-weight: 600; display: block; margin-bottom: 6px;">Sample Input Field:</label>
-        <input type="text" id="sample-input" value="ScreenSense Voice Query" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px;">
-      </div>
-
-      <p id="p-10"><span class="test-badge">Paragraph 10</span>This concludes the 10-paragraph foundational test suite for the ScreenSense Phase 2 Context Engine. Scroll up and down to observe the live viewport calculation in the HUD.</p>
-    </section>
+    <div class="instructions">
+      <div style="font-weight: bold; color: #334155;">Test Instructions:</div>
+      <ol>
+        <li>Click "Sync Context to macOS" in the ScreenSense Chrome Extension (or "Fetch DOM" in ScreenSense menu).</li>
+        <li>Press <span class="shortcut">⌥ ⇧ Space</span> and say: <strong>"Copy the paragraph"</strong>.</li>
+        <li>Open TextEdit, press <span class="shortcut">⌥ ⇧ Space</span> and say: <strong>"Paste"</strong>.</li>
+      </ol>
+    </div>
   </div>
 
   <script src="../Extension/content/visibility-analyzer.js"></script>
   <script src="../Extension/content/dom-analyzer.js"></script>
   <script>
-    // Live update of HUD when scrolling
     function updateHUD() {
       if (!window.ScreenSenseDOMAnalyzer) return;
       const ctx = window.ScreenSenseDOMAnalyzer.extractVisibleContext();
-      document.getElementById('hudCount').textContent = `${ctx.elements.length} visible`;
-      const list = document.getElementById('hudElements');
-      list.innerHTML = '';
-      ctx.elements.forEach((el, idx) => {
-        const row = document.createElement('div');
-        row.className = 'hud-item';
-        const pct = Math.round(el.visibilityPercentage * 100);
-        row.innerHTML = `
-          <span class="hud-pct">${pct}%</span>
-          <strong>[${idx + 1}]</strong> <em>${el.type}</em>: "${el.text.substring(0, 32)}..."
-        `;
-        list.appendChild(row);
-      });
+      const pCount = ctx.elements.filter(el => el.type === 'paragraph' || el.tag === 'p').length;
+      document.getElementById('hudCount').textContent = `${pCount} paragraph`;
     }
-
-    window.addEventListener('scroll', updateHUD, { passive: true });
-    window.addEventListener('resize', updateHUD, { passive: true });
     window.addEventListener('DOMContentLoaded', updateHUD);
   </script>
 </body>

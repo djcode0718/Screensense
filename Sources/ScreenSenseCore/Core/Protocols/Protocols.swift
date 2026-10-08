@@ -46,6 +46,7 @@ public protocol CommandParserProtocol: Sendable {
 public protocol ClipboardManagerProtocol: Sendable {
     func hasContent() -> Bool
     func getString() -> String?
+    func setString(_ string: String) -> Bool
 }
 
 /// Protocol for low-level input simulation (e.g. CGEvent synthesis)

@@ -16,12 +16,21 @@ final class MockInputSimulator: InputSimulatorProtocol, @unchecked Sendable {
 final class MockClipboardManager: ClipboardManagerProtocol, @unchecked Sendable {
     var mockString: String? = "Test Clipboard Content"
 
+    init(mockString: String? = "Test Clipboard Content") {
+        self.mockString = mockString
+    }
+
     func hasContent() -> Bool {
         return mockString != nil
     }
 
     func getString() -> String? {
         return mockString
+    }
+
+    func setString(_ string: String) -> Bool {
+        self.mockString = string
+        return true
     }
 }
 

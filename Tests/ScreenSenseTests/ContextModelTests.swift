@@ -55,6 +55,111 @@ final class ContextModelTests: XCTestCase {
         XCTAssertEqual(decoded.elements.first?.bounds.y, 250)
     }
 
+    func testVisibleContextDateDecodingWithFractionalSeconds() throws {
+        let json = """
+        {
+            "id": "ctx-frac-123",
+            "source": "dom",
+            "timestamp": "2026-10-08T15:21:40.123Z",
+            "viewport": {
+                "width": 1920,
+                "height": 1080,
+                "scrollX": 0,
+                "scrollY": 0,
+                "devicePixelRatio": 2.0,
+                "pageTitle": "Example",
+                "url": "https://example.com"
+            },
+            "elements": [
+                {
+                    "id": "el-1",
+                    "type": "heading",
+                    "text": "Heading Test",
+                    "bounds": { "x": 10, "y": 20, "width": 100, "height": 30 },
+                    "visibilityPercentage": 1.0,
+                    "confidence": 1.0,
+                    "source": "dom"
+                }
+            ],
+            "metadata": {}
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { d in
+            let container = try d.singleValueContainer()
+            let dateStr = try container.decode(String.self)
+            let iso8601WithMillis = ISO8601DateFormatter()
+            iso8601WithMillis.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = iso8601WithMillis.date(from: dateStr) {
+                return date
+            }
+            let iso8601Standard = ISO8601DateFormatter()
+            iso8601Standard.formatOptions = [.withInternetDateTime]
+            if let date = iso8601Standard.date(from: dateStr) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Expected date string to be ISO8601-formatted"
+            )
+        }
+
+        let data = Data(json.utf8)
+        let decoded = try decoder.decode(VisibleContext.self, from: data)
+
+        XCTAssertEqual(decoded.id, "ctx-frac-123")
+        XCTAssertEqual(decoded.source, .dom)
+        XCTAssertEqual(decoded.elements.count, 1)
+        XCTAssertEqual(decoded.elements.first?.text, "Heading Test")
+    }
+
+    func testVisibleContextDateDecodingWithoutFractionalSeconds() throws {
+        let json = """
+        {
+            "id": "ctx-std-123",
+            "source": "dom",
+            "timestamp": "2026-10-08T15:21:40Z",
+            "viewport": {
+                "width": 1920,
+                "height": 1080,
+                "scrollX": 0,
+                "scrollY": 0,
+                "devicePixelRatio": 2.0
+            },
+            "elements": [],
+            "metadata": {}
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { d in
+            let container = try d.singleValueContainer()
+            let dateStr = try container.decode(String.self)
+            let iso8601WithMillis = ISO8601DateFormatter()
+            iso8601WithMillis.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = iso8601WithMillis.date(from: dateStr) {
+                return date
+            }
+            let iso8601Standard = ISO8601DateFormatter()
+            iso8601Standard.formatOptions = [.withInternetDateTime]
+            if let date = iso8601Standard.date(from: dateStr) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Expected date string to be ISO8601-formatted"
+            )
+        }
+
+        let data = Data(json.utf8)
+        let decoded = try decoder.decode(VisibleContext.self, from: data)
+
+        XCTAssertEqual(decoded.id, "ctx-std-123")
+        XCTAssertEqual(decoded.source, .dom)
+        XCTAssertEqual(decoded.elements.count, 0)
+    }
+
     func testSpatialOrderingPreservation() {
         // Create elements out of visual order
         let elBottom = VisibleElement(

@@ -69,6 +69,35 @@ final class CommandParserTests: XCTestCase {
         }
     }
 
+    func testCopyParagraphCommandParsing() {
+        let exactPhrases = [
+            "copy the paragraph",
+            "Copy the paragraph",
+            "COPY THE PARAGRAPH",
+            "  copy the paragraph  ",
+            "copy paragraph",
+            "Copy Paragraph!",
+            "please copy the paragraph",
+            "please copy paragraph",
+            "can you copy the paragraph",
+            "copy this paragraph",
+            "copy that paragraph",
+            "copy the paragraph please",
+            "copy paragraph please"
+        ]
+
+        for phrase in exactPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Paragraph")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as copy paragraph command")
+            }
+        }
+    }
+
     func testEmptyTranscript() {
         let emptyCases = ["", "   ", "...", " , ! ? "]
         for empty in emptyCases {

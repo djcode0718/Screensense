@@ -106,17 +106,91 @@ public struct PasteCommand: Command, Equatable, Sendable {
     }
 }
 
+/// Specific implementation of Copy Paragraph Command
+public struct CopyParagraphCommand: Command, Equatable, Sendable {
+    public let actionType: CommandActionType = .copy
+    public let rawTranscript: String
+    public let normalizedTranscript: String
+    public var description: String { "Copy Paragraph" }
+
+    public init(rawTranscript: String, normalizedTranscript: String) {
+        self.rawTranscript = rawTranscript
+        self.normalizedTranscript = normalizedTranscript
+    }
+
+    public func execute(context: CommandExecutionContext) async throws -> CommandExecutionResult {
+        guard let domProvider = context.domContextProvider else {
+            return CommandExecutionResult(
+                success: false,
+                message: "No browser context provider available"
+            )
+        }
+
+        guard let domContext = try await domProvider.fetchCurrentDOMContext(), !domContext.elements.isEmpty else {
+            return CommandExecutionResult(
+                success: false,
+                message: "No visible browser content available"
+            )
+        }
+
+        let paragraphs = domContext.elements.filter { $0.type == .paragraph || $0.tag?.lowercased() == "p" }
+
+        if paragraphs.isEmpty {
+            return CommandExecutionResult(
+                success: false,
+                message: "No visible paragraph found"
+            )
+        }
+
+        if paragraphs.count == 1 {
+            let paragraph = paragraphs[0]
+            let success = context.clipboardManager.setString(paragraph.text)
+            if success {
+                return CommandExecutionResult(
+                    success: true,
+                    message: "Copied paragraph to clipboard: \"\(paragraph.text.prefix(40))...\""
+                )
+            } else {
+                return CommandExecutionResult(
+                    success: false,
+                    message: "Failed to set clipboard content"
+                )
+            }
+        }
+
+        return CommandExecutionResult(
+            success: false,
+            message: "Multiple paragraphs visible (\(paragraphs.count)). Please specify which paragraph."
+        )
+    }
+
+    public func toAnyCommand() -> AnyCommand {
+        AnyCommand(
+            actionType: actionType,
+            rawTranscript: rawTranscript,
+            normalizedTranscript: normalizedTranscript,
+            description: description,
+            executionClosure: { [self] context in
+                try await self.execute(context: context)
+            }
+        )
+    }
+}
+
 /// Execution context passed to commands
 public struct CommandExecutionContext: Sendable {
     public let pasteManager: PasteManagerProtocol
     public let clipboardManager: ClipboardManagerProtocol
+    public let domContextProvider: DOMContextProviderProtocol?
 
     public init(
         pasteManager: PasteManagerProtocol,
-        clipboardManager: ClipboardManagerProtocol
+        clipboardManager: ClipboardManagerProtocol,
+        domContextProvider: DOMContextProviderProtocol? = nil
     ) {
         self.pasteManager = pasteManager
         self.clipboardManager = clipboardManager
+        self.domContextProvider = domContextProvider
     }
 }
 

@@ -3,14 +3,15 @@
  * Coordinates context extraction between active tab and macOS ScreenSense app.
  */
 
-// Handle extension icon clicks or background queries
+const BRIDGE_URL = 'http://127.0.0.1:41920';
+
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[ScreenSense] Extension installed and background worker ready.');
+  console.log('[ScreenSense SW] Extension installed and background worker active.');
 });
 
-// Relay requests from popup / native messaging to content script
+// Relay requests from popup or keyboard shortcuts to active tab and forward to bridge
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'query_active_tab_context') {
+  if (message.action === 'query_active_tab_context' || message.action === 'sync_active_tab') {
     (async () => {
       try {
         const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -20,12 +21,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         // Send extraction command to content script in active tab
-        const response = await chrome.tabs.sendMessage(activeTab.id, {
-          action: 'push_context_to_bridge'
+        chrome.tabs.sendMessage(activeTab.id, { action: 'extract_visible_context' }, async (response) => {
+          if (chrome.runtime.lastError || !response || !response.success || !response.context) {
+            const err = chrome.runtime.lastError?.message || response?.error || 'Extraction failed';
+            console.error('[ScreenSense SW] Tab extraction error:', err);
+            sendResponse({ success: false, error: err });
+            return;
+          }
+
+          const context = response.context;
+          console.log(`[ScreenSense SW] Posting ${context.elements.length} elements to ${BRIDGE_URL}/api/context...`);
+
+          try {
+            const bridgeRes = await fetch(`${BRIDGE_URL}/api/context`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(context)
+            });
+
+            if (bridgeRes.ok) {
+              const data = await bridgeRes.json();
+              console.log('[ScreenSense SW] Bridge successfully updated:', data);
+              sendResponse({ success: true, bridgeResult: data, context });
+            } else {
+              sendResponse({ success: false, error: `Bridge returned HTTP ${bridgeRes.status}` });
+            }
+          } catch (fetchErr) {
+            console.error('[ScreenSense SW] Fetch error connecting to bridge:', fetchErr);
+            sendResponse({ success: false, error: fetchErr.message });
+          }
         });
-        sendResponse(response);
       } catch (error) {
-        console.error('[ScreenSense] Error querying active tab:', error);
+        console.error('[ScreenSense SW] Error in service worker handler:', error);
         sendResponse({ success: false, error: error.message });
       }
     })();

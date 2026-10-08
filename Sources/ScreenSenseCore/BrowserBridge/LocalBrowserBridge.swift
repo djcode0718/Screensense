@@ -52,7 +52,7 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
             case .ready:
                 ScreenSenseLogger.app.info("LocalBrowserBridge listening on 127.0.0.1:\(self.port)")
             case .failed(let error):
-                ScreenSenseLogger.app.error("LocalBrowserBridge failed: \(error.localizedDescription)")
+                ScreenSenseLogger.app.error("LocalBrowserBridge failed on port \(self.port): \(error.localizedDescription)")
             case .cancelled:
                 ScreenSenseLogger.app.info("LocalBrowserBridge cancelled")
             default:
@@ -83,26 +83,70 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
 
     private func handleIncomingConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
-        readHTTPRequest(connection: connection)
+        let buffer = Data()
+        accumulateHTTPData(connection: connection, buffer: buffer)
     }
 
-    private func readHTTPRequest(connection: NWConnection) {
+    private func accumulateHTTPData(connection: NWConnection, buffer: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536 * 16) { [weak self] data, context, isComplete, error in
-            guard let self = self, let data = data, !data.isEmpty else {
+            guard let self = self else { return }
+
+            var newBuffer = buffer
+            if let data = data, !data.isEmpty {
+                newBuffer.append(data)
+            }
+
+            // Check if headers have been fully received (\r\n\r\n)
+            if let headerEndRange = newBuffer.range(of: Data([0x0D, 0x0A, 0x0D, 0x0A])) {
+                let headerData = newBuffer.subdata(in: 0..<headerEndRange.lowerBound)
+                let headerString = String(data: headerData, encoding: .utf8) ?? ""
+
+                // Extract Content-Length if present
+                var expectedContentLength = 0
+                for line in headerString.components(separatedBy: "\r\n") {
+                    let lower = line.lowercased()
+                    if lower.hasPrefix("content-length:") {
+                        let parts = line.components(separatedBy: ":")
+                        if parts.count >= 2 {
+                            expectedContentLength = Int(parts[1].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                        }
+                    }
+                }
+
+                let bodyReceivedLength = newBuffer.count - headerEndRange.upperBound
+
+                if bodyReceivedLength >= expectedContentLength || isComplete {
+                    self.processFullHTTPRequest(data: newBuffer, connection: connection)
+                    return
+                }
+            }
+
+            if isComplete {
+                if !newBuffer.isEmpty {
+                    self.processFullHTTPRequest(data: newBuffer, connection: connection)
+                } else {
+                    connection.cancel()
+                }
+                return
+            }
+
+            if let error = error {
+                ScreenSenseLogger.app.error("Connection receive error: \(error.localizedDescription)")
                 connection.cancel()
                 return
             }
 
-            guard let requestString = String(data: data, encoding: .utf8) else {
-                self.sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"Invalid encoding\"}")
-                return
-            }
-
-            self.processHTTPRequest(requestString: requestString, connection: connection)
+            // Continue reading next chunk
+            self.accumulateHTTPData(connection: connection, buffer: newBuffer)
         }
     }
 
-    private func processHTTPRequest(requestString: String, connection: NWConnection) {
+    private func processFullHTTPRequest(data: Data, connection: NWConnection) {
+        guard let requestString = String(data: data, encoding: .utf8) else {
+            sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"Invalid encoding\"}")
+            return
+        }
+
         let lines = requestString.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else {
             sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"Bad request\"}")
@@ -118,7 +162,9 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         let method = parts[0].uppercased()
         let path = parts[1]
 
-        // Handle CORS Preflight
+        ScreenSenseLogger.app.info("Incoming HTTP \(method, privacy: .public) \(path, privacy: .public)")
+
+        // Handle CORS Preflight (OPTIONS)
         if method == "OPTIONS" {
             sendCORSPreflightResponse(connection: connection)
             return
@@ -147,22 +193,72 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
                 }
                 return
             } else if method == "POST" {
-                // Parse body after \r\n\r\n
                 if let bodyRange = requestString.range(of: "\r\n\r\n") {
                     let body = String(requestString[bodyRange.upperBound...])
-                    if let bodyData = body.data(using: .utf8) {
-                        do {
-                            let decoder = JSONDecoder()
-                            decoder.dateDecodingStrategy = .iso8601
-                            let decodedContext = try decoder.decode(VisibleContext.self, from: bodyData)
-                            self.updateContext(decodedContext)
-                            sendHTTPResponse(connection: connection, statusCode: 200, body: "{\"success\":true,\"receivedElements\":\(decodedContext.elements.count)}")
-                            return
-                        } catch {
-                            ScreenSenseLogger.app.error("Failed to decode VisibleContext JSON: \(error.localizedDescription)")
-                            sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"Invalid JSON: \(error.localizedDescription)\"}")
-                            return
+                    let headerPart = String(requestString[..<bodyRange.lowerBound])
+
+                    // Extract Content-Length from header
+                    var contentLengthHeader = "none"
+                    for hLine in headerPart.components(separatedBy: "\r\n") {
+                        if hLine.lowercased().hasPrefix("content-length:") {
+                            contentLengthHeader = hLine
                         }
+                    }
+
+                    let bodyData = body.data(using: .utf8) ?? Data()
+                    let snippetLength = min(1000, body.count)
+                    let bodySnippet = String(body.prefix(snippetLength))
+
+                    ScreenSenseLogger.app.info("[DIAGNOSTIC] HTTP POST /api/context: \(contentLengthHeader, privacy: .public), BodyByteCount=\(bodyData.count), Snippet=\(bodySnippet, privacy: .public)")
+
+                    do {
+                        let decoder = JSONDecoder()
+                        decoder.dateDecodingStrategy = .custom { d in
+                            let container = try d.singleValueContainer()
+                            let dateStr = try container.decode(String.self)
+                            let iso8601WithMillis = ISO8601DateFormatter()
+                            iso8601WithMillis.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                            if let date = iso8601WithMillis.date(from: dateStr) {
+                                return date
+                            }
+                            let iso8601Standard = ISO8601DateFormatter()
+                            iso8601Standard.formatOptions = [.withInternetDateTime]
+                            if let date = iso8601Standard.date(from: dateStr) {
+                                return date
+                            }
+                            throw DecodingError.dataCorruptedError(
+                                in: container,
+                                debugDescription: "Expected date string to be ISO8601-formatted (with or without fractional seconds), received: \(dateStr)"
+                            )
+                        }
+
+                        let decodedContext = try decoder.decode(VisibleContext.self, from: bodyData)
+                        self.updateContext(decodedContext)
+                        ScreenSenseLogger.app.info("[DIAGNOSTIC] Successfully decoded VisibleContext with \(decodedContext.elements.count) elements.")
+                        sendHTTPResponse(connection: connection, statusCode: 200, body: "{\"success\":true,\"receivedElements\":\(decodedContext.elements.count)}")
+                        return
+                    } catch let decErr as DecodingError {
+                        let diagError: String
+                        switch decErr {
+                        case .keyNotFound(let key, let context):
+                            diagError = "keyNotFound: '\(key.stringValue)' at codingPath: \(context.codingPath.map(\.stringValue)), debug: \(context.debugDescription)"
+                        case .typeMismatch(let type, let context):
+                            diagError = "typeMismatch for type '\(type)' at codingPath: \(context.codingPath.map(\.stringValue)), debug: \(context.debugDescription)"
+                        case .valueNotFound(let type, let context):
+                            diagError = "valueNotFound for type '\(type)' at codingPath: \(context.codingPath.map(\.stringValue)), debug: \(context.debugDescription)"
+                        case .dataCorrupted(let context):
+                            diagError = "dataCorrupted at codingPath: \(context.codingPath.map(\.stringValue)), debug: \(context.debugDescription)"
+                        @unknown default:
+                            diagError = decErr.localizedDescription
+                        }
+
+                        ScreenSenseLogger.app.error("[DIAGNOSTIC] DecodingError: \(diagError, privacy: .public)")
+                        sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"DecodingError: \(diagError)\"}")
+                        return
+                    } catch {
+                        ScreenSenseLogger.app.error("[DIAGNOSTIC] General JSON Decode Error: \(error.localizedDescription, privacy: .public)")
+                        sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"Invalid JSON: \(error.localizedDescription)\"}")
+                        return
                     }
                 }
             }
@@ -176,7 +272,7 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         HTTP/1.1 204 No Content\r
         Access-Control-Allow-Origin: *\r
         Access-Control-Allow-Methods: GET, POST, OPTIONS\r
-        Access-Control-Allow-Headers: Content-Type, Authorization\r
+        Access-Control-Allow-Headers: Content-Type, Authorization, Accept\r
         Access-Control-Max-Age: 86400\r
         Content-Length: 0\r
         Connection: close\r
@@ -197,7 +293,7 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         Content-Type: application/json; charset=utf-8\r
         Access-Control-Allow-Origin: *\r
         Access-Control-Allow-Methods: GET, POST, OPTIONS\r
-        Access-Control-Allow-Headers: Content-Type, Authorization\r
+        Access-Control-Allow-Headers: Content-Type, Authorization, Accept\r
         Content-Length: \(bodyData.count)\r
         Connection: close\r
         \r\n

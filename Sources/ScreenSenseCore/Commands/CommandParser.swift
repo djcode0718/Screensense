@@ -19,12 +19,52 @@ public final class DeterministicCommandParser: CommandParserProtocol {
             return .success(command: pasteCmd.toAnyCommand())
         }
 
-        // Future extensions can hook in here (e.g. isCopyCommand, isSelectCommand, etc.)
+        // Check for Copy Paragraph command patterns
+        if isCopyParagraphCommand(normalized) {
+            let copyCmd = CopyParagraphCommand(rawTranscript: transcript, normalizedTranscript: normalized)
+            return .success(command: copyCmd.toAnyCommand())
+        }
 
         return .unsupported(
             transcript: transcript,
             reason: "Command not recognized: \"\(transcript)\""
         )
+    }
+
+    private func isCopyParagraphCommand(_ normalized: String) -> Bool {
+        let directMatches: Set<String> = [
+            "copy the paragraph",
+            "copy paragraph",
+            "copy this paragraph",
+            "copy that paragraph",
+            "please copy the paragraph",
+            "please copy paragraph",
+            "can you copy the paragraph",
+            "copy the paragraph please",
+            "copy paragraph please"
+        ]
+
+        if directMatches.contains(normalized) {
+            return true
+        }
+
+        let words = normalized.components(separatedBy: " ").filter { !$0.isEmpty }
+        let fillerWords: Set<String> = ["please", "hey", "can", "you", "just", "screensense", "now", "would", "could", "will"]
+        let cleanedWords = words.filter { !fillerWords.contains($0) }
+        let cleanedPhrase = cleanedWords.joined(separator: " ")
+
+        if directMatches.contains(cleanedPhrase) {
+            return true
+        }
+
+        if cleanedWords == ["copy", "the", "paragraph"] ||
+           cleanedWords == ["copy", "paragraph"] ||
+           cleanedWords == ["copy", "this", "paragraph"] ||
+           cleanedWords == ["copy", "that", "paragraph"] {
+            return true
+        }
+
+        return false
     }
 
     private func isPasteCommand(_ normalized: String) -> Bool {

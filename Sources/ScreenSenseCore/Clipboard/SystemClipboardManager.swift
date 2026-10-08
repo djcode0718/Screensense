@@ -13,4 +13,10 @@ public final class SystemClipboardManager: ClipboardManagerProtocol, @unchecked 
         let pasteboard = NSPasteboard.general
         return pasteboard.string(forType: .string)
     }
+
+    public func setString(_ string: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString(string, forType: .string)
+    }
 }

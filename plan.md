@@ -92,8 +92,9 @@ ScreenSense/
 
 The context engine adheres to the following rules to extract **what is visible in the current viewport**:
 
-1. **Structural Hiddenness**:
-   - Elements with computed `display: none`, `visibility: hidden`, `opacity: 0`, `[hidden]`, or `[aria-hidden="true"]` are strictly excluded.
+1. **Structural Hiddenness (Self & Ancestor)**:
+   - Elements with computed `display: none`, `visibility: hidden`, `opacity: 0`, `[hidden]`, `[inert]`, or `[aria-hidden="true"]` are strictly excluded.
+   - Elements whose ancestor container has `[aria-hidden="true"]`, `[hidden]`, `[inert]`, `display: none`, `visibility: hidden`, or `opacity: 0` are recursively excluded via `element.closest()` and ancestor tree evaluation.
 2. **Zero Dimension Filter**:
    - Elements with `width === 0` or `height === 0` are excluded.
 3. **Viewport Intersection Geometry**:

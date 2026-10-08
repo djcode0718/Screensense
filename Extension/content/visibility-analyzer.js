@@ -5,22 +5,54 @@
 class VisibilityAnalyzer {
   /**
    * Checks if an element is structurally hidden via CSS or HTML attributes.
+   * Checks both the element itself and all its ancestor containers.
    * @param {Element} element
    * @param {CSSStyleDeclaration} [computedStyle]
    * @returns {boolean}
    */
   static isStructurallyHidden(element, computedStyle) {
-    if (!element || element.nodeType !== Node.ELEMENT_NODE) return true;
+    if (!element || element.nodeType !== 1) return true;
 
-    if (element.hasAttribute('hidden')) return true;
-    if (element.getAttribute('aria-hidden') === 'true') return true;
+    // 1. Check self or any ancestor for aria-hidden="true"
+    if (element.closest && element.closest('[aria-hidden="true"]')) {
+      return true;
+    }
 
+    // 2. Check self or any ancestor for the HTML hidden attribute
+    if (element.closest && element.closest('[hidden]')) {
+      return true;
+    }
+
+    // 3. Check self or any ancestor for inert attribute
+    if (element.closest && element.closest('[inert]')) {
+      return true;
+    }
+
+    // 4. Check self computed styles
     const style = computedStyle || window.getComputedStyle(element);
     if (!style) return true;
 
     if (style.display === 'none') return true;
     if (style.visibility === 'hidden' || style.visibility === 'collapse') return true;
     if (parseFloat(style.opacity) === 0) return true;
+
+    // 5. Walk ancestor tree to check for parent display:none, visibility:hidden, or opacity:0
+    let parent = element.parentElement;
+    const bodyEl = (typeof document !== 'undefined') ? document.body : null;
+    const docEl = (typeof document !== 'undefined') ? document.documentElement : null;
+    while (parent && parent !== bodyEl && parent !== docEl) {
+      const pStyle = (typeof window !== 'undefined') ? window.getComputedStyle(parent) : null;
+      if (
+        pStyle &&
+        (pStyle.display === 'none' ||
+        pStyle.visibility === 'hidden' ||
+        pStyle.visibility === 'collapse' ||
+        parseFloat(pStyle.opacity) === 0)
+      ) {
+        return true;
+      }
+      parent = parent.parentElement;
+    }
 
     return false;
   }
@@ -88,5 +120,10 @@ class VisibilityAnalyzer {
   }
 }
 
-// Expose globally for content scripts
-window.ScreenSenseVisibilityAnalyzer = VisibilityAnalyzer;
+// Expose globally for content scripts and test environments
+if (typeof window !== 'undefined') {
+  window.ScreenSenseVisibilityAnalyzer = VisibilityAnalyzer;
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = VisibilityAnalyzer;
+}

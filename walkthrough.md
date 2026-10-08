@@ -105,12 +105,28 @@ Click the ScreenSense menu bar icon to open the status popup. The checklist show
 
 ## 6. Automated Test Suite
 
-Run the full automated test suite:
+### Run Swift Automated Tests (20 Tests):
 ```bash
 swift test
 ```
 
-### Test Coverage Summary (20 Tests):
+### Run Chrome Extension Automated Tests (10 Tests):
+```bash
+node Extension/test/visibility-analyzer.test.js
+```
+
+### Test Coverage Summary:
+- **`visibility-analyzer.test.js` (10 JS Tests)**:
+  - Standard visible element detection
+  - Self `aria-hidden="true"` exclusion
+  - Ancestor `aria-hidden="true"` recursive exclusion
+  - Self and ancestor `[hidden]` attribute exclusion
+  - `display: none` exclusion
+  - `visibility: hidden` exclusion
+  - Self and ancestor `opacity: 0` exclusion
+  - Zero-dimension (`0x0`, `0x50`, `50x0`) element exclusion
+  - Outside viewport (above/below/left/right) exclusion
+  - Partially visible element calculation (`50% visible`)
 - **`ContextModelTests`**: JSON serialization/deserialization of `VisibleContext`, spatial reading order sorting (`spatiallySortedElements`), and type-based filtering.
 - **`ContextFusionTests`**: Fusion logic for DOM only, ScreenCaptureKit only, and unified multimodal combination.
 - **`LocalBrowserBridgeTests`**: Local HTTP bridge context propagation and `DOMContextProvider` delegation.

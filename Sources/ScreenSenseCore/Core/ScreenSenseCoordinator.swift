@@ -197,7 +197,8 @@ public final class ScreenSenseCoordinator: ObservableObject {
     private func executeCommand(_ command: AnyCommand) {
         let context = CommandExecutionContext(
             pasteManager: pasteManager,
-            clipboardManager: clipboardManager
+            clipboardManager: clipboardManager,
+            domContextProvider: domContextProvider
         )
 
         Task {
