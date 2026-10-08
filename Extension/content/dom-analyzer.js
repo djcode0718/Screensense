@@ -70,6 +70,12 @@ class DOMAnalyzer {
     const selectors = [
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'p',
+      'span',
+      'label',
+      'strong',
+      'em',
+      'dt',
+      'dd',
       'li',
       'blockquote',
       'pre',
@@ -97,13 +103,13 @@ class DOMAnalyzer {
       if (!text || text.length === 0) continue;
 
       // Skip elements whose children already represent the text exactly
-      // (prevents parent article/section duplicate of individual paragraphs)
+      // (prevents parent article/section/div duplicate of individual paragraphs/spans)
       const hasSpecificChild = candidates.some(other =>
         other !== element &&
         element.contains(other) &&
-        ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li'].includes(other.tagName.toLowerCase())
+        ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'span', 'label', 'strong', 'button', 'a'].includes(other.tagName.toLowerCase())
       );
-      if (hasSpecificChild && ['article', 'section', 'div'].includes(element.tagName.toLowerCase())) {
+      if (hasSpecificChild && ['article', 'section', 'div', 'p', 'li'].includes(element.tagName.toLowerCase())) {
         continue;
       }
 

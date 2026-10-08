@@ -221,4 +221,48 @@ final class CoordinatorTests: XCTestCase {
             }
         }
     }
+
+    @MainActor
+    func testCoordinatorVoiceToSemanticCopyExecutionFlow() async throws {
+        let sut = makeSUT()
+        sut.coordinator.start()
+
+        let title = VisibleElement(id: "h1", type: .heading, text: "ScreenSense Test Store", bounds: ElementBounds(x: 50, y: 50, width: 400, height: 40), tag: "h1")
+        let introP = VisibleElement(id: "p1", type: .paragraph, text: "Product: Premium Wireless Headphones.", bounds: ElementBounds(x: 50, y: 100, width: 600, height: 30), tag: "p")
+        let priceDiv = VisibleElement(id: "div-price", type: .genericText, text: "Price: ₹2,499", bounds: ElementBounds(x: 50, y: 150, width: 200, height: 30), tag: "div")
+        let emailDiv = VisibleElement(id: "div-email", type: .genericText, text: "Support: support@screensense.test", bounds: ElementBounds(x: 50, y: 190, width: 300, height: 30), tag: "div")
+        let button = VisibleElement(id: "btn-apply", type: .button, text: "Apply Coupon", bounds: ElementBounds(x: 50, y: 240, width: 140, height: 40), tag: "button")
+        let adjacentText = VisibleElement(id: "span-note", type: .genericText, text: "Discount available for students.", bounds: ElementBounds(x: 200, y: 245, width: 250, height: 30), tag: "span")
+        let h2 = VisibleElement(id: "h2", type: .heading, text: "Heading Two", bounds: ElementBounds(x: 50, y: 320, width: 400, height: 40), tag: "h2")
+        let h2Text = VisibleElement(id: "p-h2", type: .paragraph, text: "This is ScreenSense paragraph under Heading Two.", bounds: ElementBounds(x: 50, y: 370, width: 600, height: 30), tag: "p")
+
+        let ctx = VisibleContext(
+            source: .dom,
+            viewport: ViewportInfo(width: 1440, height: 900),
+            elements: [title, introP, priceDiv, emailDiv, button, adjacentText, h2, h2Text]
+        )
+        sut.bridge.updateContext(ctx)
+
+        let semanticTests: [(voice: String, expectedCopied: String)] = [
+            ("Copy the email address", "support@screensense.test"),
+            ("Copy the price", "₹2,499"),
+            ("Copy the text below the title", "Product: Premium Wireless Headphones."),
+            ("Copy the text next to the Apply button", "Discount available for students."),
+            ("Copy the text under Heading Two", "This is ScreenSense paragraph under Heading Two.")
+        ]
+
+        for test in semanticTests {
+            sut.coordinator.startListening()
+            sut.mockVoice.simulateFinish(result: .success(test.voice))
+            try await Task.sleep(nanoseconds: 80_000_000)
+
+            XCTAssertEqual(sut.mockClipboard.getString(), test.expectedCopied, "Failed to copy expected text for '\(test.voice)'")
+            if case .executed(let cmd, let msg) = sut.coordinator.state {
+                XCTAssertTrue(cmd.contains("Copy"), "Expected Copy command description for '\(test.voice)'")
+                XCTAssertTrue(msg.contains("Copied"), "Expected execution success message for '\(test.voice)'")
+            } else {
+                XCTFail("Expected .executed state for '\(test.voice)', got \(sut.coordinator.state)")
+            }
+        }
+    }
 }

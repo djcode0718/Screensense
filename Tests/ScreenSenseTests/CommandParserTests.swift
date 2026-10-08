@@ -266,6 +266,37 @@ final class CommandParserTests: XCTestCase {
         }
     }
 
+    func testSemanticCommandParsing() {
+        let testCases: [(phrase: String, expectedIntentDesc: String)] = [
+            ("copy the text below the title", "Copy Text Below Title"),
+            ("copy the text under the title", "Copy Text Below Title"),
+            ("copy text below title", "Copy Text Below Title"),
+            ("copy the text under Heading Two", "Copy Text Below Heading 'heading two'"),
+            ("copy text under Product Details", "Copy Text Below Heading 'product details'"),
+            ("copy the text next to the Apply button", "Copy Text Next To Button 'apply'"),
+            ("copy text next to Apply Coupon button", "Copy Text Next To Button 'apply coupon'"),
+            ("copy the email address", "Copy Email Address"),
+            ("copy email address", "Copy Email Address"),
+            ("copy the email", "Copy Email Address"),
+            ("copy email", "Copy Email Address"),
+            ("please copy the email address", "Copy Email Address"),
+            ("copy the price", "Copy Price"),
+            ("copy price", "Copy Price"),
+            ("copy the total price", "Copy Price")
+        ]
+
+        for (phrase, expectedDesc) in testCases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, expectedDesc, "Expected description '\(expectedDesc)' for '\(phrase)', got '\(command.description)'")
+            default:
+                XCTFail("Failed to parse semantic command '\(phrase)'")
+            }
+        }
+    }
+
     func testEmptyTranscript() {
         let emptyCases = ["", "   ", "...", " , ! ? "]
         for empty in emptyCases {

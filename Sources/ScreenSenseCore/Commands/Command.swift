@@ -284,20 +284,109 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
     }
 }
 
+/// Command for copying content selected through deterministic semantic relationships
+public struct SemanticCopyCommand: Command, Equatable, Sendable {
+    public let actionType: CommandActionType = .copy
+    public let rawTranscript: String
+    public let normalizedTranscript: String
+    public let intent: SemanticSelectionIntent
+
+    public var description: String {
+        switch intent {
+        case .below(let ref):
+            return "Copy Text Below \(ref)"
+        case .nextTo(let ref):
+            return "Copy Text Next To \(ref)"
+        case .email:
+            return "Copy Email Address"
+        case .price:
+            return "Copy Price"
+        }
+    }
+
+    public init(rawTranscript: String, normalizedTranscript: String, intent: SemanticSelectionIntent) {
+        self.rawTranscript = rawTranscript
+        self.normalizedTranscript = normalizedTranscript
+        self.intent = intent
+    }
+
+    public func execute(context: CommandExecutionContext) async throws -> CommandExecutionResult {
+        guard let domProvider = context.domContextProvider else {
+            return CommandExecutionResult(
+                success: false,
+                message: "No browser context provider available"
+            )
+        }
+
+        guard let domContext = try await domProvider.fetchCurrentDOMContext(), !domContext.elements.isEmpty else {
+            return CommandExecutionResult(
+                success: false,
+                message: "No visible browser content available"
+            )
+        }
+
+        let selectionResult = context.semanticSelector.select(intent: intent, in: domContext)
+
+        switch selectionResult {
+        case .success(_, let textToCopy):
+            let success = context.clipboardManager.setString(textToCopy)
+            if success {
+                let preview = textToCopy.count > 40 ? "\(textToCopy.prefix(40))..." : textToCopy
+                return CommandExecutionResult(
+                    success: true,
+                    message: "Copied \"\(preview)\" to clipboard"
+                )
+            } else {
+                return CommandExecutionResult(
+                    success: false,
+                    message: "Failed to set clipboard content"
+                )
+            }
+
+        case .notFound(let reason):
+            return CommandExecutionResult(
+                success: false,
+                message: reason
+            )
+
+        case .ambiguous(let reason, _):
+            return CommandExecutionResult(
+                success: false,
+                message: reason
+            )
+        }
+    }
+
+    public func toAnyCommand() -> AnyCommand {
+        AnyCommand(
+            actionType: actionType,
+            rawTranscript: rawTranscript,
+            normalizedTranscript: normalizedTranscript,
+            description: description,
+            executionClosure: { [self] context in
+                try await self.execute(context: context)
+            }
+        )
+    }
+}
+
 /// Execution context passed to commands
 public struct CommandExecutionContext: Sendable {
     public let pasteManager: PasteManagerProtocol
     public let clipboardManager: ClipboardManagerProtocol
     public let domContextProvider: DOMContextProviderProtocol?
+    public let semanticSelector: SemanticElementSelectorProtocol
 
     public init(
         pasteManager: PasteManagerProtocol,
         clipboardManager: ClipboardManagerProtocol,
-        domContextProvider: DOMContextProviderProtocol? = nil
+        domContextProvider: DOMContextProviderProtocol? = nil,
+        semanticSelector: SemanticElementSelectorProtocol = SemanticElementSelector()
     ) {
         self.pasteManager = pasteManager
         self.clipboardManager = clipboardManager
         self.domContextProvider = domContextProvider
+        self.semanticSelector = semanticSelector
     }
 }
 

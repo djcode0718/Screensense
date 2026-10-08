@@ -19,6 +19,11 @@ public final class DeterministicCommandParser: CommandParserProtocol {
             return .success(command: pasteCmd.toAnyCommand())
         }
 
+        // Check for Semantic Selection command patterns (below, next to, email, price)
+        if let semanticCmd = parseSemanticCommand(normalized, rawTranscript: transcript) {
+            return .success(command: semanticCmd.toAnyCommand())
+        }
+
         // Check for Copy Element command patterns (heading, button, link, paragraph)
         if let copyCmd = parseCopyElementCommand(normalized, rawTranscript: transcript) {
             return .success(command: copyCmd.toAnyCommand())
@@ -28,6 +33,89 @@ public final class DeterministicCommandParser: CommandParserProtocol {
             transcript: transcript,
             reason: "Command not recognized: \"\(transcript)\""
         )
+    }
+
+    private func parseSemanticCommand(_ normalized: String, rawTranscript: String) -> SemanticCopyCommand? {
+        let words = normalized.components(separatedBy: " ").filter { !$0.isEmpty }
+        let fillerWords: Set<String> = ["please", "hey", "can", "you", "just", "screensense", "now", "would", "could", "will", "do"]
+        let cleanedWords = words.filter { !fillerWords.contains($0) }
+
+        guard let first = cleanedWords.first, first == "copy" else { return nil }
+        let tokens = Array(cleanedWords.dropFirst())
+        guard !tokens.isEmpty else { return nil }
+
+        let articles: Set<String> = ["the", "this", "that", "a", "an"]
+
+        // 1. Email Patterns: "copy the email address", "copy that email", "copy email"
+        if tokens == ["email"] ||
+           (tokens.count == 2 && articles.contains(tokens[0]) && tokens[1] == "email") ||
+           tokens == ["email", "address"] ||
+           (tokens.count == 3 && articles.contains(tokens[0]) && tokens[1] == "email" && tokens[2] == "address") {
+            return SemanticCopyCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, intent: .email)
+        }
+
+        // 2. Price Patterns: "copy the price", "copy that price", "copy price", "copy the total price"
+        if tokens == ["price"] ||
+           (tokens.count == 2 && articles.contains(tokens[0]) && tokens[1] == "price") ||
+           tokens == ["total", "price"] ||
+           (tokens.count == 3 && articles.contains(tokens[0]) && tokens[1] == "total" && tokens[2] == "price") {
+            return SemanticCopyCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, intent: .price)
+        }
+
+        // 3. "below" / "under" Patterns:
+        // Examples: "copy the text below the title", "copy that text under heading two", "copy text below product details"
+        var isBelowQuery = false
+        var afterRelationTokens: [String] = []
+
+        var scanTokens = tokens
+        if scanTokens.count >= 2 && articles.contains(scanTokens[0]) && scanTokens[1] == "text" {
+            scanTokens = Array(scanTokens.dropFirst(2))
+        } else if scanTokens.count >= 1 && scanTokens[0] == "text" {
+            scanTokens = Array(scanTokens.dropFirst(1))
+        }
+
+        if scanTokens.count >= 1 && (scanTokens[0] == "below" || scanTokens[0] == "under") {
+            isBelowQuery = true
+            afterRelationTokens = Array(scanTokens.dropFirst(1))
+        }
+
+        if isBelowQuery && !afterRelationTokens.isEmpty {
+            let targetTokens = articles.contains(afterRelationTokens[0]) ? Array(afterRelationTokens.dropFirst()) : afterRelationTokens
+            if targetTokens == ["title"] || targetTokens == ["heading"] || targetTokens == ["header"] || targetTokens == ["main", "title"] {
+                return SemanticCopyCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, intent: .below(reference: .title))
+            } else {
+                let headingQuery = targetTokens.joined(separator: " ")
+                return SemanticCopyCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, intent: .below(reference: .heading(text: headingQuery)))
+            }
+        }
+
+        // 4. "next to" Patterns:
+        // Examples: "copy the text next to the apply button", "copy that text next to the apply button", "copy text next to apply"
+        var isNextToQuery = false
+        var nextToTokens: [String] = []
+
+        var scanNextTokens = tokens
+        if scanNextTokens.count >= 2 && articles.contains(scanNextTokens[0]) && scanNextTokens[1] == "text" {
+            scanNextTokens = Array(scanNextTokens.dropFirst(2))
+        } else if scanNextTokens.count >= 1 && scanNextTokens[0] == "text" {
+            scanNextTokens = Array(scanNextTokens.dropFirst(1))
+        }
+
+        if scanNextTokens.count >= 2 && scanNextTokens[0] == "next" && scanNextTokens[1] == "to" {
+            isNextToQuery = true
+            nextToTokens = Array(scanNextTokens.dropFirst(2))
+        }
+
+        if isNextToQuery && !nextToTokens.isEmpty {
+            var targetTokens = articles.contains(nextToTokens[0]) ? Array(nextToTokens.dropFirst()) : nextToTokens
+            if targetTokens.last == "button" {
+                targetTokens = Array(targetTokens.dropLast())
+            }
+            let buttonText = targetTokens.joined(separator: " ")
+            return SemanticCopyCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, intent: .nextTo(reference: .button(text: buttonText)))
+        }
+
+        return nil
     }
 
     private static let elementNounMap: [String: ElementType] = [

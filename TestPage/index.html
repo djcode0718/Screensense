@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ScreenSense Deterministic DOM Element Test Page</title>
+  <title>ScreenSense Semantic DOM Context Test Page</title>
   <style>
     :root {
       --primary: #2563eb;
@@ -30,52 +30,66 @@
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
     header {
-      margin-bottom: 20px;
+      margin-bottom: 16px;
       border-bottom: 2px solid var(--border);
       padding-bottom: 12px;
     }
-    h1 { font-size: 1.6rem; color: #1e3a8a; margin-bottom: 8px; }
-    h2 { font-size: 1.3rem; color: #1e40af; margin-top: 20px; margin-bottom: 8px; }
+    h1 { font-size: 1.6rem; color: #1e3a8a; margin-bottom: 4px; }
+    h2 { font-size: 1.3rem; color: #1e40af; margin-top: 24px; margin-bottom: 8px; }
     
-    .paragraphs-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin: 12px 0;
+    .product-intro {
+      font-size: 1.05rem;
+      color: #334155;
+      margin-bottom: 16px;
+      padding: 10px 14px;
+      background: #f1f5f9;
+      border-radius: 6px;
     }
 
-    .p-card {
+    .info-card {
       background: #f8fafc;
       border: 1px solid var(--border);
-      border-left: 4px solid var(--primary);
-      padding: 10px 14px;
-      border-radius: 0 6px 6px 0;
-    }
-    .p-label {
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      color: var(--primary);
-      margin-bottom: 2px;
-    }
-    p {
-      font-size: 1.05rem;
-      font-weight: 500;
-      color: #1e293b;
-      margin: 0;
-    }
-
-    .section-block {
-      margin-top: 20px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border);
-    }
-
-    .elements-row {
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
       display: flex;
+      flex-direction: column;
       gap: 12px;
+    }
+
+    .info-row {
+      display: flex;
       align-items: center;
-      margin-top: 8px;
+      gap: 12px;
+      font-size: 1.05rem;
+    }
+
+    .info-label {
+      font-weight: 700;
+      color: #64748b;
+      min-width: 130px;
+    }
+
+    .price-value {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #059669;
+    }
+
+    .email-value {
+      font-weight: 600;
+      color: #2563eb;
+    }
+
+    .button-group-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin: 16px 0;
+      padding: 12px 16px;
+      background: #eff6ff;
+      border-radius: 8px;
+      border: 1px solid #bfdbfe;
     }
 
     .test-btn {
@@ -89,19 +103,27 @@
       cursor: pointer;
       box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
     }
-    .test-btn-secondary {
-      background: #475569;
-      box-shadow: 0 2px 4px rgba(71, 85, 105, 0.2);
+
+    .adjacent-text {
+      font-size: 0.95rem;
+      font-weight: 500;
+      color: #1e40af;
     }
 
-    .test-link {
-      color: #2563eb;
+    .details-section {
+      margin-top: 12px;
+    }
+    .detail-item {
+      margin-bottom: 10px;
+      padding: 10px 14px;
+      background: #f8fafc;
+      border-left: 4px solid var(--primary);
+      border-radius: 0 6px 6px 0;
+    }
+    .detail-item p {
       font-size: 1rem;
-      font-weight: 600;
-      text-decoration: underline;
-      padding: 6px 10px;
-      background: #eff6ff;
-      border-radius: 4px;
+      color: #1e293b;
+      margin: 0;
     }
 
     .instructions {
@@ -159,69 +181,58 @@
       <span>ScreenSense HUD</span>
       <span id="hudCount">DOM Elements</span>
     </div>
-    <div id="hudDetails">Ready for Element Copy</div>
+    <div id="hudDetails">Ready for Semantic Context Selection</div>
   </div>
 
   <div class="container">
     <header>
-      <h1 id="heading-1">Heading One</h1>
+      <h1 id="main-title">ScreenSense Test Store</h1>
     </header>
 
-    <div class="paragraphs-grid">
-      <div class="p-card">
-        <div class="p-label">Paragraph 1</div>
-        <p id="p-1">This is ScreenSense paragraph one.</p>
+    <p id="product-intro" class="product-intro">Product: Premium Wireless Noise-Canceling Headphones.</p>
+
+    <div class="info-card">
+      <div class="info-row">
+        <span class="info-label">Price:</span>
+        <span id="price-target" class="price-value">₹2,499</span>
       </div>
 
-      <div class="p-card">
-        <div class="p-label">Paragraph 2</div>
-        <p id="p-2">This is ScreenSense paragraph two.</p>
-      </div>
-
-      <div class="p-card">
-        <div class="p-label">Paragraph 3</div>
-        <p id="p-3">This is ScreenSense paragraph three.</p>
+      <div class="info-row">
+        <span class="info-label">Support Email:</span>
+        <span id="email-target" class="email-value">support@screensense.test</span>
       </div>
     </div>
 
-    <h2 id="heading-2">Heading Two</h2>
+    <div class="button-group-row">
+      <button id="apply-btn" class="test-btn">Apply Coupon</button>
+      <span id="apply-adjacent" class="adjacent-text">Discount available for students.</span>
+    </div>
 
-    <div class="paragraphs-grid">
-      <div class="p-card">
-        <div class="p-label">Paragraph 4</div>
-        <p id="p-4">This is ScreenSense paragraph four.</p>
+    <h2 id="heading-details">Product Details</h2>
+    <div class="details-section">
+      <div class="detail-item">
+        <p id="detail-battery">Battery Life: Up to 40 hours of continuous playback.</p>
       </div>
-
-      <div class="p-card">
-        <div class="p-label">Paragraph 5</div>
-        <p id="p-5">This is ScreenSense paragraph five.</p>
+      <div class="detail-item">
+        <p id="detail-conn">Connectivity: Bluetooth 5.3 with multi-device pairing.</p>
       </div>
     </div>
 
-    <div class="section-block">
-      <div class="p-label">Buttons</div>
-      <div class="elements-row">
-        <button id="btn-1" class="test-btn">Button One</button>
-        <button id="btn-2" class="test-btn test-btn-secondary">Button Two</button>
-      </div>
-    </div>
-
-    <div class="section-block">
-      <div class="p-label">Links</div>
-      <div class="elements-row">
-        <a id="link-1" href="#link1" class="test-link">Link One</a>
-        <a id="link-2" href="#link2" class="test-link">Link Two</a>
-        <a id="link-3" href="#link3" class="test-link">Link Three</a>
+    <h2 id="heading-two">Heading Two</h2>
+    <div class="details-section">
+      <div class="detail-item">
+        <p id="p-heading-two">This is ScreenSense paragraph under Heading Two.</p>
       </div>
     </div>
 
     <div class="instructions">
-      <div style="font-weight: bold; color: #1e3a8a;">Supported Voice Commands:</div>
+      <div style="font-weight: bold; color: #1e3a8a;">Semantic Voice Commands to Test:</div>
       <ol>
-        <li><strong>Headings:</strong> "Copy the first heading", "Copy the second heading", "Copy heading 2"</li>
-        <li><strong>Buttons:</strong> "Copy the first button", "Copy the second button", "Copy button 2"</li>
-        <li><strong>Links:</strong> "Copy the first link", "Copy the second link", "Copy the third link", "Copy link 3"</li>
-        <li><strong>Paragraphs:</strong> "Copy the third paragraph", "Copy paragraph 5"</li>
+        <li><strong>Below Title:</strong> "Copy the text below the title"</li>
+        <li><strong>Under Heading:</strong> "Copy the text under Heading Two" or "Copy the text under Product Details"</li>
+        <li><strong>Next to Button:</strong> "Copy the text next to the Apply button"</li>
+        <li><strong>Email Address:</strong> "Copy the email address"</li>
+        <li><strong>Price:</strong> "Copy the price"</li>
       </ol>
     </div>
   </div>
@@ -232,12 +243,8 @@
     function updateHUD() {
       if (!window.ScreenSenseDOMAnalyzer) return;
       const ctx = window.ScreenSenseDOMAnalyzer.extractVisibleContext();
-      const hCount = ctx.elements.filter(el => el.type === 'heading' || ['h1','h2','h3','h4','h5','h6'].includes(el.tag)).length;
-      const pCount = ctx.elements.filter(el => el.type === 'paragraph' || el.tag === 'p').length;
-      const bCount = ctx.elements.filter(el => el.type === 'button' || el.tag === 'button').length;
-      const lCount = ctx.elements.filter(el => el.type === 'link' || el.tag === 'a').length;
       document.getElementById('hudCount').textContent = `${ctx.elements.length} elements`;
-      document.getElementById('hudDetails').textContent = `${hCount} headings, ${pCount} paragraphs, ${bCount} buttons, ${lCount} links`;
+      document.getElementById('hudDetails').textContent = `Ready for Semantic Copy`;
     }
     window.addEventListener('DOMContentLoaded', updateHUD);
   </script>
