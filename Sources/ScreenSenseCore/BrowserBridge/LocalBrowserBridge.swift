@@ -10,7 +10,21 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
     private let lock = NSLock()
     private var _latestDOMContext: VisibleContext?
     private var _lastConnectedAt: Date?
+    private var _onContextReceived: (@Sendable (VisibleContext) -> Void)?
     private let port: UInt16
+
+    public var onContextReceived: (@Sendable (VisibleContext) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _onContextReceived
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _onContextReceived = newValue
+        }
+    }
 
     public var latestDOMContext: VisibleContext? {
         lock.lock()
@@ -77,8 +91,17 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         lock.lock()
         self._latestDOMContext = context
         self._lastConnectedAt = Date()
+        let handler = self._onContextReceived
         lock.unlock()
-        ScreenSenseLogger.app.info("Received DOM context update with \(context.elements.count) elements from \(context.viewport.pageTitle ?? "Webpage", privacy: .public)")
+
+        let tabId = context.metadata["tab_id"] ?? "unknown"
+        let windowId = context.metadata["window_id"] ?? "unknown"
+        let pageTitle = context.viewport.pageTitle ?? "Webpage"
+        let url = context.viewport.url ?? "unknown"
+
+        ScreenSenseLogger.app.info("[SS-TAB-SYNC] ScreenSense LocalBrowserBridge.updateContext() received \(context.elements.count) elements from tabId=\(tabId, privacy: .public) windowId=\(windowId, privacy: .public) '\(pageTitle, privacy: .public)' (url: \(url, privacy: .public)) timestamp: \(context.timestamp, privacy: .public)")
+        ScreenSenseLogger.app.info("[SS-VIEWPORT-SYNC] Swift context received scrollY=\(Int(context.viewport.scrollY)) elements=\(context.elements.count)")
+        handler?(context)
     }
 
     private func handleIncomingConnection(_ connection: NWConnection) {
@@ -193,21 +216,20 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
                 }
                 return
             } else if method == "POST" {
-                if let bodyRange = requestString.range(of: "\r\n\r\n") {
-                    let body = String(requestString[bodyRange.upperBound...])
-                    let headerPart = String(requestString[..<bodyRange.lowerBound])
+                if let headerEndRange = data.range(of: Data([0x0D, 0x0A, 0x0D, 0x0A])) {
+                    let headerData = data.subdata(in: 0..<headerEndRange.lowerBound)
+                    let headerString = String(data: headerData, encoding: .utf8) ?? ""
 
                     // Extract Content-Length from header
                     var contentLengthHeader = "none"
-                    for hLine in headerPart.components(separatedBy: "\r\n") {
+                    for hLine in headerString.components(separatedBy: "\r\n") {
                         if hLine.lowercased().hasPrefix("content-length:") {
                             contentLengthHeader = hLine
                         }
                     }
 
-                    let bodyData = body.data(using: .utf8) ?? Data()
-                    let snippetLength = min(1000, body.count)
-                    let bodySnippet = String(body.prefix(snippetLength))
+                    let bodyData = data.subdata(in: headerEndRange.upperBound..<data.count)
+                    let bodySnippet = String(data: bodyData.prefix(1000), encoding: .utf8) ?? "<non-utf8 bytes>"
 
                     ScreenSenseLogger.app.info("[DIAGNOSTIC] HTTP POST /api/context: \(contentLengthHeader, privacy: .public), BodyByteCount=\(bodyData.count), Snippet=\(bodySnippet, privacy: .public)")
 

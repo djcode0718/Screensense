@@ -142,10 +142,11 @@ public struct SemanticElementSelector: SemanticElementSelectorProtocol, Sendable
         let refBottom = refRect.maxY
 
         // 2. Filter candidates below the reference heading
-        // Candidate must be visible, positioned below the heading, non-empty, and NOT another heading
+        // Candidate must be visible, positioned below the heading, non-empty, NOT another heading, and NOT navigation boilerplate
         let belowCandidates = elements.filter { cand in
             guard cand.id != refElement.id else { return false }
             guard !isHeading(cand) else { return false }
+            guard !Self.isNavigationOrBoilerplate(cand) else { return false }
             let candText = cand.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !candText.isEmpty else { return false }
 
@@ -158,7 +159,7 @@ public struct SemanticElementSelector: SemanticElementSelectorProtocol, Sendable
             return .notFound(reason: "No visible text found below '\(refElement.text)'")
         }
 
-        // 3. Score candidates by vertical distance and horizontal alignment
+        // 3. Score candidates by vertical distance, horizontal alignment, and content substance
         struct ScoredCandidate {
             let element: VisibleElement
             let verticalDistance: Double
@@ -171,13 +172,19 @@ public struct SemanticElementSelector: SemanticElementSelectorProtocol, Sendable
             let verticalDist = max(0, candRect.minY - refBottom)
             let horizontalOffset = abs(candRect.midX - refRect.midX)
 
-            // Prefer paragraph/text elements
-            var typeBonus = 0.0
+            // Prefer substantial paragraph/article text elements
+            var substanceBonus = 0.0
             if cand.type == .paragraph || cand.tag?.lowercased() == "p" {
-                typeBonus = -5.0
+                substanceBonus -= 15.0
+            }
+            if cand.text.count >= 50 {
+                substanceBonus -= 10.0
+            }
+            if cand.text.contains(".") {
+                substanceBonus -= 5.0
             }
 
-            let totalScore = verticalDist + (horizontalOffset * 0.2) + typeBonus
+            let totalScore = verticalDist + (horizontalOffset * 0.2) + substanceBonus
             return ScoredCandidate(
                 element: cand,
                 verticalDistance: verticalDist,
@@ -467,6 +474,33 @@ public struct SemanticElementSelector: SemanticElementSelectorProtocol, Sendable
            (elText.contains("heading three") || elText.contains("heading 3")) { return true }
         if (normalizedSearch == "heading 4" || normalizedSearch == "heading four") &&
            (elText.contains("heading four") || elText.contains("heading 4")) { return true }
+        return false
+    }
+
+    public static func isNavigationOrBoilerplate(_ element: VisibleElement) -> Bool {
+        let trimmed = element.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+
+        let navLabels: Set<String> = [
+            "article", "talk", "read", "edit", "view history", "tools", "action", "general",
+            "main page", "contents", "current events", "random article", "about wikipedia",
+            "contact us", "donate", "help", "learn to edit", "community portal", "recent changes",
+            "upload file", "special pages", "permanent link", "page information", "cite this page",
+            "get shortened url", "download as pdf", "printable version", "languages", "hide",
+            "show", "jump to content", "search", "navigation", "toggle sidebar", "sidebar",
+            "switch to dark mode", "switch to light mode", "sign in", "log in", "create account",
+            "menu", "close", "back to top", "from wikipedia, the free encyclopedia"
+        ]
+        if navLabels.contains(lower) { return true }
+
+        if lower.hasPrefix("[edit") || lower == "edit" || (lower.hasPrefix("[") && lower.hasSuffix("]") && lower.count <= 5) {
+            return true
+        }
+
+        if (element.type == .button || element.type == .link) && trimmed.count < 30 && !trimmed.contains(".") && !trimmed.contains(" ") {
+            return true
+        }
+
         return false
     }
 }

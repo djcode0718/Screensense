@@ -12,4 +12,6 @@ public enum ScreenSenseLogger {
     public static let parser = Logger(subsystem: subsystem, category: "CommandParser")
     public static let input = Logger(subsystem: subsystem, category: "InputSimulation")
     public static let permissions = Logger(subsystem: subsystem, category: "Permissions")
+    public static let context = Logger(subsystem: subsystem, category: "Context")
+    public static let coordinator = Logger(subsystem: subsystem, category: "Coordinator")
 }

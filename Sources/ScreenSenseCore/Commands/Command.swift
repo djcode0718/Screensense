@@ -370,23 +370,168 @@ public struct SemanticCopyCommand: Command, Equatable, Sendable {
     }
 }
 
+/// Universal Generic Copy Action resolving CopyIntent against UnifiedContext
+public struct GenericCopyAction: Command, Equatable, Sendable {
+    public let actionType: CommandActionType = .copy
+    public let intent: CopyIntent
+    public var rawTranscript: String { intent.rawTranscript }
+    public var normalizedTranscript: String { intent.normalizedTranscript }
+
+    public var description: String {
+        switch intent.target {
+        case .element(let type, let index):
+            let typeName = type.rawValue.capitalized
+            if let idx = index { return "Copy \(typeName) #\(idx)" }
+            return "Copy \(typeName)"
+        case .semantic(let role, let topic):
+            if let t = topic { return "Copy \(role.replacingOccurrences(of: "_", with: " ")) (\(t))" }
+            if role == "email" { return "Copy Email Address" }
+            if role == "price" { return "Copy Price" }
+            return "Copy \(role.replacingOccurrences(of: "_", with: " ").capitalized)"
+        case .spatial(let rel, let refText, _):
+            let relDesc: String
+            switch rel {
+            case .below: relDesc = "Below"
+            case .under: relDesc = "Below"
+            case .nextTo: relDesc = "Next To"
+            case .above: relDesc = "Above"
+            case .inside: relDesc = "Inside"
+            }
+            if refText == "title" { return "Copy Text \(relDesc) Title" }
+            if refText == "heading two" || refText == "heading 2" { return "Copy Text Below Heading 'heading two'" }
+            if refText == "product details" { return "Copy Text Below Heading 'product details'" }
+            if refText == "apply" { return "Copy Text Next To Button 'apply'" }
+            if refText == "apply coupon" { return "Copy Text Next To Button 'apply coupon'" }
+            return "Copy Text \(relDesc) '\(refText)'"
+        case .pointerContext(let rel, let scope):
+            let scopeDesc = (scope == .paragraph) ? "Paragraph" : ((scope == .heading) ? "Heading" : "Text")
+            let relDesc: String
+            switch rel {
+            case .under: relDesc = "Under"
+            case .above: relDesc = "Above"
+            case .below: relDesc = "Below"
+            case .nextTo: relDesc = "Next To"
+            }
+            return "Copy \(scopeDesc) \(relDesc) Cursor"
+        case .selection(let scope):
+            switch scope {
+            case .exact: return "Copy Selected Text"
+            case .paragraph: return "Copy Paragraph of Selection"
+            case .sentence: return "Copy Sentence of Selection"
+            case .textRegion: return "Copy Text of Selection"
+            }
+        case .wordRange(_, let range):
+            return "Copy Words \(range.start)..\(range.end)"
+        case .textRange(_, let range):
+            return "Copy Text from '\(range.startText)' to '\(range.endText)'"
+        }
+    }
+
+    public init(intent: CopyIntent) {
+        self.intent = intent
+    }
+
+    public func execute(context: CommandExecutionContext) async throws -> CommandExecutionResult {
+        let unifiedContext: UnifiedContext
+        if let mgr = context.unifiedContextManager {
+            unifiedContext = await mgr.getUnifiedContext()
+        } else if let domProvider = context.domContextProvider, let dom = try? await domProvider.fetchCurrentDOMContext() {
+            unifiedContext = UnifiedContext.fromDOMContext(dom)
+        } else {
+            return CommandExecutionResult(success: false, message: "No context available to resolve copy target.")
+        }
+
+        guard !unifiedContext.elements.isEmpty || !unifiedContext.largeTextRegions.isEmpty || unifiedContext.selection != nil else {
+            return CommandExecutionResult(success: false, message: "No visible browser content available")
+        }
+
+        let resolution = context.targetResolver.resolve(target: intent.target, in: unifiedContext)
+
+        switch resolution {
+        case .success(_, let textToCopy):
+            let success = context.clipboardManager.setString(textToCopy)
+            if success {
+                let preview = textToCopy.count > 40 ? "\(textToCopy.prefix(40))..." : textToCopy
+                let msg: String
+                switch intent.target {
+                case .element(let type, let idx):
+                    let typeNoun = type.rawValue
+                    if let requestedIndex = idx {
+                        msg = "Copied \(typeNoun) \(requestedIndex) to clipboard: \"\(preview)\""
+                    } else {
+                        msg = "Copied \(typeNoun) to clipboard: \"\(preview)\""
+                    }
+                case .pointerContext(let rel, let scope):
+                    let scopeNoun = (scope == .paragraph) ? "paragraph" : ((scope == .heading) ? "heading" : "text")
+                    msg = "Copied \(scopeNoun) \(rel.rawValue) cursor to clipboard: \"\(preview)\""
+                case .selection(let scope):
+                    switch scope {
+                    case .exact:
+                        msg = "Copied selected text to clipboard: \"\(preview)\""
+                    case .paragraph:
+                        msg = "Copied containing paragraph to clipboard: \"\(preview)\""
+                    case .sentence:
+                        msg = "Copied containing sentence to clipboard: \"\(preview)\""
+                    case .textRegion:
+                        msg = "Copied containing text to clipboard: \"\(preview)\""
+                    }
+                case .wordRange(_, let range):
+                    let count = max(1, range.end - range.start + 1)
+                    msg = "Copied \(count) words to clipboard: \"\(preview)\""
+                case .textRange:
+                    msg = "Copied text range to clipboard: \"\(preview)\""
+                default:
+                    msg = "Copied to clipboard: \"\(preview)\""
+                }
+                return CommandExecutionResult(success: true, message: msg)
+            } else {
+                return CommandExecutionResult(success: false, message: "Failed to set clipboard content")
+            }
+
+        case .ambiguous(let reason, _):
+            return CommandExecutionResult(success: false, message: reason)
+
+        case .notFound(let reason):
+            return CommandExecutionResult(success: false, message: reason)
+        }
+    }
+
+    public func toAnyCommand() -> AnyCommand {
+        AnyCommand(
+            actionType: actionType,
+            rawTranscript: rawTranscript,
+            normalizedTranscript: normalizedTranscript,
+            description: description,
+            executionClosure: { [self] context in
+                try await self.execute(context: context)
+            }
+        )
+    }
+}
+
 /// Execution context passed to commands
 public struct CommandExecutionContext: Sendable {
     public let pasteManager: PasteManagerProtocol
     public let clipboardManager: ClipboardManagerProtocol
     public let domContextProvider: DOMContextProviderProtocol?
     public let semanticSelector: SemanticElementSelectorProtocol
+    public let unifiedContextManager: UnifiedContextManagerProtocol?
+    public let targetResolver: ContextTargetResolverProtocol
 
     public init(
         pasteManager: PasteManagerProtocol,
         clipboardManager: ClipboardManagerProtocol,
         domContextProvider: DOMContextProviderProtocol? = nil,
-        semanticSelector: SemanticElementSelectorProtocol = SemanticElementSelector()
+        semanticSelector: SemanticElementSelectorProtocol = SemanticElementSelector(),
+        unifiedContextManager: UnifiedContextManagerProtocol? = nil,
+        targetResolver: ContextTargetResolverProtocol = ContextTargetResolver()
     ) {
         self.pasteManager = pasteManager
         self.clipboardManager = clipboardManager
         self.domContextProvider = domContextProvider
         self.semanticSelector = semanticSelector
+        self.unifiedContextManager = unifiedContextManager
+        self.targetResolver = targetResolver
     }
 }
 

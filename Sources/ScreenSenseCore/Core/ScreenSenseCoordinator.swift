@@ -11,6 +11,7 @@ public final class ScreenSenseCoordinator: ObservableObject {
     @Published public private(set) var lastCommandDescription: String = ""
     @Published public private(set) var lastExecutionMessage: String = ""
     @Published public private(set) var latestContext: VisibleContext?
+    @Published public private(set) var latestUnifiedContext: UnifiedContext?
     @Published public private(set) var isBridgeRunning: Bool = false
 
     private let hotkeyManager: HotkeyManagerProtocol
@@ -24,6 +25,34 @@ public final class ScreenSenseCoordinator: ObservableObject {
     private let browserBridge: BrowserBridgeProtocol
     private let domContextProvider: DOMContextProviderProtocol
     private let contextFusion: ContextFusionProtocol
+    public let unifiedContextManager: UnifiedContextManagerProtocol
+
+    public var currentApplicationName: String {
+        latestUnifiedContext?.applicationName ?? unifiedContextManager.currentApplicationName
+    }
+
+    public var activeTabTitle: String {
+        latestUnifiedContext?.activeTabTitle ?? unifiedContextManager.activeTabTitle
+    }
+
+    public var contextStatusDescription: String {
+        guard let ctx = latestUnifiedContext ?? unifiedContextManager.latestContext else {
+            return "No Context Captured Yet"
+        }
+
+        let isChrome = currentApplicationName.contains("Chrome") || currentApplicationName.contains("Chromium")
+
+        if ctx.source == .dom {
+            return "Chrome DOM • \(ctx.elements.count) elements (\(ctx.freshnessState.rawValue.capitalized))"
+        } else if ctx.source == .ocr {
+            if isChrome, let reason = unifiedContextManager.fallbackReason {
+                return "Screen Capture (OCR) • \(ctx.elements.count) elements (Fallback: \(reason))"
+            }
+            return "Screen Capture (OCR) • \(ctx.elements.count) elements (\(ctx.freshnessState.rawValue.capitalized))"
+        } else {
+            return "\(ctx.source.rawValue.capitalized) • \(ctx.elements.count) elements (\(ctx.freshnessState.rawValue.capitalized))"
+        }
+    }
 
     public init(
         hotkeyManager: HotkeyManagerProtocol = CarbonHotkeyManager(),
@@ -35,7 +64,8 @@ public final class ScreenSenseCoordinator: ObservableObject {
         audioFeedback: AudioFeedbackProtocol = SystemAudioFeedback(),
         screenCaptureProvider: ScreenCaptureProviderProtocol = SCKScreenCaptureProvider(),
         browserBridge: BrowserBridgeProtocol = LocalBrowserBridge(),
-        contextFusion: ContextFusionProtocol = ContextFusion()
+        contextFusion: ContextFusionProtocol = ContextFusion(),
+        unifiedContextManager: UnifiedContextManagerProtocol? = nil
     ) {
         self.hotkeyManager = hotkeyManager
         self.voiceManager = voiceManager
@@ -48,6 +78,30 @@ public final class ScreenSenseCoordinator: ObservableObject {
         self.browserBridge = browserBridge
         self.domContextProvider = DOMContextProvider(bridge: browserBridge)
         self.contextFusion = contextFusion
+        let manager = unifiedContextManager ?? UnifiedContextManager(
+            browserBridge: browserBridge,
+            screenCaptureProvider: ScreenCaptureContextProvider(captureProvider: screenCaptureProvider)
+        )
+        self.unifiedContextManager = manager
+        self.latestUnifiedContext = manager.latestContext
+
+        // Wire live context propagation to MainActor-isolated published properties
+        self.unifiedContextManager.onContextUpdated = { [weak self] ctx in
+            Task { @MainActor in
+                self?.latestUnifiedContext = ctx
+                let visibleCtx = VisibleContext(
+                    id: ctx.id,
+                    source: ctx.source,
+                    timestamp: ctx.timestamp,
+                    viewport: ctx.viewport ?? ViewportInfo(width: 1920, height: 1080, scrollX: 0, scrollY: 0, devicePixelRatio: 1.0, pageTitle: ctx.activeTabTitle, url: ctx.viewport?.url),
+                    elements: ctx.elements,
+                    screenshot: nil,
+                    metadata: ctx.metadata
+                )
+                self?.latestContext = visibleCtx
+                ScreenSenseLogger.app.info("[SS-VIEWPORT-SYNC] coordinator published context title='\(ctx.activeTabTitle, privacy: .public)' scrollY=\(Int(ctx.viewport?.scrollY ?? 0))")
+            }
+        }
     }
 
     public func start() {
@@ -55,9 +109,11 @@ public final class ScreenSenseCoordinator: ObservableObject {
         refreshPermissions()
         registerGlobalHotkey()
         startBrowserBridge()
+        unifiedContextManager.startMonitoring()
     }
 
     public func stop() {
+        unifiedContextManager.stopMonitoring()
         hotkeyManager.unregister()
         voiceManager.stopListening()
         browserBridge.stop()
@@ -209,7 +265,10 @@ public final class ScreenSenseCoordinator: ObservableObject {
         let context = CommandExecutionContext(
             pasteManager: pasteManager,
             clipboardManager: clipboardManager,
-            domContextProvider: domContextProvider
+            domContextProvider: domContextProvider,
+            semanticSelector: SemanticElementSelector(),
+            unifiedContextManager: unifiedContextManager,
+            targetResolver: ContextTargetResolver()
         )
 
         Task {

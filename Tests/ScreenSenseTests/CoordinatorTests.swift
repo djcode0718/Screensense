@@ -265,4 +265,57 @@ final class CoordinatorTests: XCTestCase {
             }
         }
     }
+
+    @MainActor
+    func testCoordinatorVoiceToWordRangeAndTextRangeCopyExecutionFlow() async throws {
+        let sut = makeSUT()
+        sut.coordinator.start()
+
+        let p1 = VisibleElement(
+            id: "p1",
+            type: .paragraph,
+            text: "ScreenSense is the premier context-aware voice assistant for macOS.",
+            bounds: ElementBounds(x: 50, y: 100, width: 600, height: 30),
+            tag: "p"
+        )
+        let p2 = VisibleElement(
+            id: "p2",
+            type: .paragraph,
+            text: "We deliver packages from Amazon to India with ultra-fast logistics.",
+            bounds: ElementBounds(x: 50, y: 150, width: 600, height: 30),
+            tag: "p"
+        )
+
+        let ctx = VisibleContext(
+            source: .dom,
+            viewport: ViewportInfo(width: 1440, height: 900),
+            elements: [p1, p2]
+        )
+        sut.bridge.updateContext(ctx)
+
+        // 1. Word range: "words 4 to 6 from the first paragraph" -> "premier context-aware voice"
+        sut.coordinator.startListening()
+        sut.mockVoice.simulateFinish(result: .success("copy words 4 to 6 from the first paragraph"))
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        XCTAssertEqual(sut.mockClipboard.getString(), "premier context-aware voice")
+        if case .executed(let cmd, let msg) = sut.coordinator.state {
+            XCTAssertTrue(cmd.contains("Copy Words 4..6"))
+            XCTAssertTrue(msg.contains("Copied 3 words"))
+        } else {
+            XCTFail("Expected .executed state, got \(sut.coordinator.state)")
+        }
+
+        // 2. Text range: "copy from Amazon to India"
+        sut.coordinator.startListening()
+        sut.mockVoice.simulateFinish(result: .success("ScreenSense, copy from Amazon to India"))
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        XCTAssertEqual(sut.mockClipboard.getString(), "Amazon to India")
+        if case .executed(let cmd, _) = sut.coordinator.state {
+            XCTAssertTrue(cmd.lowercased().contains("amazon") && cmd.lowercased().contains("india"))
+        } else {
+            XCTFail("Expected .executed state, got \(sut.coordinator.state)")
+        }
+    }
 }

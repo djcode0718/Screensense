@@ -15,14 +15,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Check macOS Bridge Status
   async function checkBridgeStatus() {
     try {
-      console.log(`[ScreenSense Popup] Checking bridge status at ${BRIDGE_URL}/api/status...`);
       const res = await fetch(`${BRIDGE_URL}/api/status`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
       if (res.ok) {
-        const data = await res.json();
-        console.log('[ScreenSense Popup] Bridge response:', data);
+        const data = await res.json().catch(() => ({}));
         statusBadge.textContent = 'App Connected';
         statusBadge.className = 'badge connected';
         return true;
@@ -30,118 +28,85 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error(`HTTP ${res.status}`);
       }
     } catch (e) {
-      console.warn('[ScreenSense Popup] Bridge unreachable:', e.message);
       statusBadge.textContent = 'App Offline';
       statusBadge.className = 'badge disconnected';
       return false;
     }
   }
 
-  // Load Active Tab Context Preview
+  // Load Active Tab Context Preview via Service Worker
   async function loadActiveTabContext() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.id) {
-        console.warn('[ScreenSense Popup] No active tab found.');
-        return;
-      }
+      chrome.runtime.sendMessage({ action: 'query_active_tab_context' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[ScreenSense Popup] Runtime error querying context:', chrome.runtime.lastError.message);
+          visibleCountEl.textContent = 'Unavailable';
+          return;
+        }
 
-      chrome.tabs.sendMessage(tab.id, { action: 'extract_visible_context' }, (response) => {
-        if (chrome.runtime.lastError || !response || !response.success || !response.context) {
-          console.warn('[ScreenSense Popup] Content script extraction returned:', chrome.runtime.lastError || response);
+        if (!response || !response.success || !response.context) {
+          const err = response?.error || 'No context returned';
+          console.warn('[ScreenSense Popup] Context query returned error:', err);
           visibleCountEl.textContent = 'N/A';
           return;
         }
 
         const ctx = response.context;
-        pageTitleEl.textContent = (ctx.viewport.pageTitle || 'Webpage').substring(0, 24);
-        visibleCountEl.textContent = `${ctx.elements.length} visible`;
-        viewportDimEl.textContent = `${ctx.viewport.width} × ${ctx.viewport.height}`;
+        pageTitleEl.textContent = (ctx.viewport?.pageTitle || 'Webpage').substring(0, 24);
+        visibleCountEl.textContent = `${ctx.elements?.length || 0} visible`;
+        viewportDimEl.textContent = `${ctx.viewport?.width || 0} × ${ctx.viewport?.height || 0}`;
 
         // Render preview list
         previewList.innerHTML = '';
-        ctx.elements.slice(0, 10).forEach((el, idx) => {
-          const item = document.createElement('div');
-          item.className = 'element-item';
-          const pct = Math.round(el.visibilityPercentage * 100);
-          item.innerHTML = `
-            <span class="element-tag">[${idx + 1}] ${el.type}</span>
-            <span class="element-pct">${pct}%</span>
-            <div>"${el.text.substring(0, 50)}${el.text.length > 50 ? '...' : ''}"</div>
-          `;
-          previewList.appendChild(item);
-        });
+        if (Array.isArray(ctx.elements)) {
+          ctx.elements.slice(0, 10).forEach((el, idx) => {
+            const item = document.createElement('div');
+            item.className = 'element-item';
+            const pct = Math.round((el.visibilityPercentage || 1) * 100);
+            item.innerHTML = `
+              <span class="element-tag">[${idx + 1}] ${el.type}</span>
+              <span class="element-pct">${pct}%</span>
+              <div>"${(el.text || '').substring(0, 50)}${(el.text || '').length > 50 ? '...' : ''}"</div>
+            `;
+            previewList.appendChild(item);
+          });
+        }
       });
     } catch (e) {
-      console.error('[ScreenSense Popup] Error loading active tab context:', e);
+      console.error('[ScreenSense Popup] Error loading active tab context:', e.message);
     }
   }
 
   // Sync Context Button Handler
   syncBtn.addEventListener('click', async () => {
-    syncBtn.textContent = 'Extracting...';
-    console.log('[ScreenSense Popup] Sync initiated by user.');
+    syncBtn.textContent = 'Syncing...';
 
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab || !tab.id) {
-        syncBtn.textContent = 'No Active Tab';
+    chrome.runtime.sendMessage({ action: 'sync_active_tab' }, (response) => {
+      if (chrome.runtime.lastError) {
+        const errMsg = chrome.runtime.lastError.message;
+        console.error('[ScreenSense Popup] Sync message error:', errMsg);
+        syncBtn.textContent = 'Sync Failed';
         setTimeout(() => { syncBtn.textContent = 'Sync Context to macOS'; }, 2000);
         return;
       }
 
-      // Step 1: Request visible context extraction from content script
-      chrome.tabs.sendMessage(tab.id, { action: 'extract_visible_context' }, async (response) => {
-        if (chrome.runtime.lastError || !response || !response.success || !response.context) {
-          const errMsg = chrome.runtime.lastError?.message || response?.error || 'Unknown error';
-          console.error('[ScreenSense Popup] Extraction failed:', errMsg);
-          syncBtn.textContent = 'Extraction Failed';
-          setTimeout(() => { syncBtn.textContent = 'Sync Context to macOS'; }, 2000);
-          return;
-        }
+      if (response && response.success) {
+        const count = response.context?.elements?.length || 0;
+        console.log(`[ScreenSense Popup] Synced ${count} elements to bridge.`);
+        syncBtn.textContent = `✓ Synced ${count} elements!`;
+        statusBadge.textContent = 'App Connected';
+        statusBadge.className = 'badge connected';
+        loadActiveTabContext();
+      } else {
+        const err = response?.error || 'Unknown bridge error';
+        console.error('[ScreenSense Popup] Sync error:', err);
+        syncBtn.textContent = 'Sync Error';
+      }
 
-        const context = response.context;
-        console.log(`[ScreenSense Popup] Extracted ${context.elements.length} elements from ${context.viewport.pageTitle || 'page'}.`);
-        syncBtn.textContent = 'Sending to macOS...';
-
-        // Step 2: Post payload directly from privileged extension context to macOS bridge
-        try {
-          const bridgeRes = await fetch(`${BRIDGE_URL}/api/context`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify(context)
-          });
-
-          if (bridgeRes.ok) {
-            const resData = await bridgeRes.json();
-            console.log('[ScreenSense Popup] Bridge sync SUCCESS:', resData);
-            syncBtn.textContent = `✓ Synced ${context.elements.length} elements!`;
-            statusBadge.textContent = 'App Connected';
-            statusBadge.className = 'badge connected';
-          } else {
-            const errText = await bridgeRes.text();
-            console.error(`[ScreenSense Popup] Bridge error ${bridgeRes.status}:`, errText);
-            syncBtn.textContent = `Bridge Error (${bridgeRes.status})`;
-          }
-        } catch (fetchError) {
-          console.error('[ScreenSense Popup] Failed to connect to ScreenSense bridge:', fetchError);
-          syncBtn.textContent = 'Sync Failed (App Offline)';
-          statusBadge.textContent = 'App Offline';
-          statusBadge.className = 'badge disconnected';
-        }
-
-        setTimeout(() => {
-          syncBtn.textContent = 'Sync Context to macOS';
-        }, 2500);
-      });
-    } catch (e) {
-      console.error('[ScreenSense Popup] Unexpected sync error:', e);
-      syncBtn.textContent = 'Sync Error';
-      setTimeout(() => { syncBtn.textContent = 'Sync Context to macOS'; }, 2000);
-    }
+      setTimeout(() => {
+        syncBtn.textContent = 'Sync Context to macOS';
+      }, 2500);
+    });
   });
 
   await checkBridgeStatus();

@@ -80,6 +80,7 @@ public protocol BrowserBridgeProtocol: AnyObject, Sendable {
     func stop()
     var latestDOMContext: VisibleContext? { get }
     var isConnected: Bool { get }
+    var onContextReceived: (@Sendable (VisibleContext) -> Void)? { get set }
 }
 
 /// Protocol for managing and checking macOS permissions

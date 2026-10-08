@@ -2,37 +2,24 @@ import Foundation
 
 /// Deterministic parser for converting speech transcripts into actionable Commands
 public final class DeterministicCommandParser: CommandParserProtocol {
+    private let intentParser = GenericIntentParser()
+
     public init() {}
 
     public func parse(transcript: String) -> CommandParseResult {
-        let normalized = StringNormalizer.normalize(transcript)
-
-        ScreenSenseLogger.parser.debug("Parsing transcript: '\(transcript, privacy: .public)', normalized: '\(normalized, privacy: .public)'")
-
-        if normalized.isEmpty {
+        let intent = intentParser.parse(transcript: transcript)
+        switch intent {
+        case .empty:
             return .empty
-        }
-
-        // Check for Paste command patterns
-        if isPasteCommand(normalized) {
-            let pasteCmd = PasteCommand(rawTranscript: transcript, normalizedTranscript: normalized)
+        case .paste(let pasteIntent):
+            let pasteCmd = PasteCommand(rawTranscript: pasteIntent.rawTranscript, normalizedTranscript: pasteIntent.normalizedTranscript)
             return .success(command: pasteCmd.toAnyCommand())
+        case .copy(let copyIntent):
+            let copyAction = GenericCopyAction(intent: copyIntent)
+            return .success(command: copyAction.toAnyCommand())
+        case .unsupported(let raw, let reason):
+            return .unsupported(transcript: raw, reason: reason)
         }
-
-        // Check for Semantic Selection command patterns (below, next to, email, price)
-        if let semanticCmd = parseSemanticCommand(normalized, rawTranscript: transcript) {
-            return .success(command: semanticCmd.toAnyCommand())
-        }
-
-        // Check for Copy Element command patterns (heading, button, link, paragraph)
-        if let copyCmd = parseCopyElementCommand(normalized, rawTranscript: transcript) {
-            return .success(command: copyCmd.toAnyCommand())
-        }
-
-        return .unsupported(
-            transcript: transcript,
-            reason: "Command not recognized: \"\(transcript)\""
-        )
     }
 
     private func parseSemanticCommand(_ normalized: String, rawTranscript: String) -> SemanticCopyCommand? {

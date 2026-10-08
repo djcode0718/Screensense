@@ -122,7 +122,17 @@ class DOMAnalyzer {
       if (!visibility) continue;
 
       const type = this.getElementType(element);
-      const id = element.id || `el-${processedElements.length + 1}-${Math.random().toString(36).substr(2, 6)}`;
+      const id = element.id || `el-${processedElements.length + 1}-${type}`;
+
+      let selector = element.tagName.toLowerCase();
+      if (element.id && typeof element.id === 'string') {
+        selector = `#${element.id}`;
+      } else if (typeof element.className === 'string' && element.className.trim()) {
+        const classNames = element.className.trim().split(/\s+/).filter(Boolean);
+        if (classNames.length > 0) {
+          selector = `.${classNames.join('.')}`;
+        }
+      }
 
       processedElements.push({
         id: id,
@@ -133,7 +143,7 @@ class DOMAnalyzer {
         confidence: 1.0,
         source: 'dom',
         tag: element.tagName.toLowerCase(),
-        selector: element.id ? `#${element.id}` : (element.className ? `.${element.className.split(' ').join('.')}` : element.tagName.toLowerCase())
+        selector: selector
       });
     }
 
@@ -156,6 +166,62 @@ class DOMAnalyzer {
       url: window.location.href || null
     };
 
+    // Selection context extraction
+    let selectionContext = null;
+    try {
+      const sel = (typeof window !== 'undefined' && window.getSelection) ? window.getSelection() : null;
+      if (sel && !sel.isCollapsed && sel.toString().trim().length > 0) {
+        const selText = sel.toString().trim();
+        let bounds = null;
+        let containingElementId = null;
+        if (sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          if (rect) {
+            bounds = {
+              x: Math.round(rect.left),
+              y: Math.round(rect.top),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height)
+            };
+          }
+          let ancestor = range.commonAncestorContainer;
+          if (ancestor && ancestor.nodeType === 3) {
+            ancestor = ancestor.parentElement;
+          }
+          if (ancestor && ancestor.id) {
+            containingElementId = ancestor.id;
+          }
+        }
+        selectionContext = {
+          text: selText,
+          bounds: bounds,
+          containingElementId: containingElementId,
+          containingRegionId: null,
+          startOffset: null,
+          endOffset: null
+        };
+      }
+    } catch (e) {
+      // Ignore in mock/test environments
+    }
+
+    // Pointer context extraction
+    let pointerContext = null;
+    try {
+      const lastPointer = (typeof window !== 'undefined') ? window.__SCREENSENSE_LAST_POINTER__ : null;
+      if (lastPointer && typeof lastPointer.x === 'number' && typeof lastPointer.y === 'number') {
+        pointerContext = {
+          x: lastPointer.x,
+          y: lastPointer.y,
+          elementId: null,
+          containingRegionId: null
+        };
+      }
+    } catch (e) {
+      // Ignore
+    }
+
     return {
       id: `ctx-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       source: 'dom',
@@ -163,6 +229,8 @@ class DOMAnalyzer {
       viewport: viewportInfo,
       elements: processedElements,
       screenshot: null,
+      pointer: pointerContext,
+      selection: selectionContext,
       metadata: {
         total_dom_candidates: `${candidates.length}`,
         visible_elements_count: `${processedElements.length}`,

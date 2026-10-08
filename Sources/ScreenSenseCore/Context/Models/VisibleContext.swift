@@ -147,6 +147,52 @@ public struct ScreenCaptureData: Codable, Equatable, Sendable {
     }
 }
 
+/// Mouse cursor pointer coordinates and resolved containment
+public struct PointerContext: Codable, Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let elementId: String?
+    public let containingRegionId: String?
+
+    public init(
+        x: Double,
+        y: Double,
+        elementId: String? = nil,
+        containingRegionId: String? = nil
+    ) {
+        self.x = x
+        self.y = y
+        self.elementId = elementId
+        self.containingRegionId = containingRegionId
+    }
+}
+
+/// Active text selection and containment metadata
+public struct SelectionContext: Codable, Equatable, Sendable {
+    public let text: String
+    public let bounds: ElementBounds?
+    public let containingElementId: String?
+    public let containingRegionId: String?
+    public let startOffset: Int?
+    public let endOffset: Int?
+
+    public init(
+        text: String,
+        bounds: ElementBounds? = nil,
+        containingElementId: String? = nil,
+        containingRegionId: String? = nil,
+        startOffset: Int? = nil,
+        endOffset: Int? = nil
+    ) {
+        self.text = text
+        self.bounds = bounds
+        self.containingElementId = containingElementId
+        self.containingRegionId = containingRegionId
+        self.startOffset = startOffset
+        self.endOffset = endOffset
+    }
+}
+
 /// Common Unified Context Model representing the user's visible screen state
 public struct VisibleContext: Codable, Equatable, Identifiable, Sendable {
     public let id: String
@@ -155,6 +201,8 @@ public struct VisibleContext: Codable, Equatable, Identifiable, Sendable {
     public let viewport: ViewportInfo
     public let elements: [VisibleElement]
     public let screenshot: ScreenCaptureData?
+    public let pointer: PointerContext?
+    public let selection: SelectionContext?
     public let metadata: [String: String]
 
     public init(
@@ -164,6 +212,8 @@ public struct VisibleContext: Codable, Equatable, Identifiable, Sendable {
         viewport: ViewportInfo,
         elements: [VisibleElement] = [],
         screenshot: ScreenCaptureData? = nil,
+        pointer: PointerContext? = nil,
+        selection: SelectionContext? = nil,
         metadata: [String: String] = [:]
     ) {
         self.id = id
@@ -172,6 +222,8 @@ public struct VisibleContext: Codable, Equatable, Identifiable, Sendable {
         self.viewport = viewport
         self.elements = elements
         self.screenshot = screenshot
+        self.pointer = pointer
+        self.selection = selection
         self.metadata = metadata
     }
 

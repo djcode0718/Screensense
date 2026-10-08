@@ -84,6 +84,52 @@ public struct MenuBarView: View {
                     Spacer()
                 }
 
+                // Active App, Active Tab & Context Status
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("Active App:").font(.caption2).fontWeight(.bold).foregroundColor(.secondary)
+                        Text(coordinator.currentApplicationName)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                        Spacer()
+                        Circle()
+                            .fill(coordinator.unifiedContextManager.isBridgeConnected ? Color.green : Color.orange)
+                            .frame(width: 6, height: 6)
+                        Text(coordinator.unifiedContextManager.isBridgeConnected ? "Bridge Connected" : "Bridge Idle")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Text("Active Tab:").font(.caption2).fontWeight(.bold).foregroundColor(.secondary)
+                        Text(coordinator.activeTabTitle)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    HStack(alignment: .top) {
+                        Text("Context:").font(.caption2).fontWeight(.bold).foregroundColor(.secondary)
+                        Text(coordinator.contextStatusDescription)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                        Spacer()
+                    }
+                    if let fallback = coordinator.unifiedContextManager.fallbackReason {
+                        HStack(alignment: .top) {
+                            Text("Fallback Reason:").font(.system(size: 9)).fontWeight(.bold).foregroundColor(.orange)
+                            Text(fallback)
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                            Spacer()
+                        }
+                    }
+                }
+                .padding(6)
+                .background(Color.primary.opacity(0.04))
+                .cornerRadius(6)
+
                 if !coordinator.currentTranscript.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Transcript:")
@@ -357,7 +403,7 @@ public struct MenuBarView: View {
 
     private var badgeText: String {
         switch coordinator.state {
-        case .idle: return "IDLE"
+        case .idle: return coordinator.permissionStatus.allGranted ? "READY" : "IDLE"
         case .listening: return "LISTENING"
         case .processing: return "PROCESSING"
         case .executed: return "DONE"
@@ -367,7 +413,7 @@ public struct MenuBarView: View {
 
     private var stateIcon: String {
         switch coordinator.state {
-        case .idle: return "mic.circle"
+        case .idle: return coordinator.permissionStatus.allGranted ? "checkmark.circle" : "mic.circle"
         case .listening: return "waveform.circle.fill"
         case .processing: return "gearshape.arrow.triangle.2.circlepath"
         case .executed: return "checkmark.circle.fill"
@@ -377,7 +423,7 @@ public struct MenuBarView: View {
 
     private var stateColor: Color {
         switch coordinator.state {
-        case .idle: return .blue
+        case .idle: return coordinator.permissionStatus.allGranted ? .green : .blue
         case .listening: return .red
         case .processing: return .orange
         case .executed: return .green
