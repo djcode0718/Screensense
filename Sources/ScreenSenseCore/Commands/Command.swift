@@ -111,11 +111,19 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
     public let actionType: CommandActionType = .copy
     public let rawTranscript: String
     public let normalizedTranscript: String
-    public var description: String { "Copy Paragraph" }
+    public let targetIndex: Int? // 1-based index (e.g. 1 = first, 3 = third, nil = generic)
 
-    public init(rawTranscript: String, normalizedTranscript: String) {
+    public var description: String {
+        if let idx = targetIndex {
+            return "Copy Paragraph #\(idx)"
+        }
+        return "Copy Paragraph"
+    }
+
+    public init(rawTranscript: String, normalizedTranscript: String, targetIndex: Int? = nil) {
         self.rawTranscript = rawTranscript
         self.normalizedTranscript = normalizedTranscript
+        self.targetIndex = targetIndex
     }
 
     public func execute(context: CommandExecutionContext) async throws -> CommandExecutionResult {
@@ -133,7 +141,8 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
             )
         }
 
-        let paragraphs = domContext.elements.filter { $0.type == .paragraph || $0.tag?.lowercased() == "p" }
+        // Preserve visual reading order
+        let paragraphs = domContext.spatiallySortedElements.filter { $0.type == .paragraph || $0.tag?.lowercased() == "p" }
 
         if paragraphs.isEmpty {
             return CommandExecutionResult(
@@ -142,6 +151,38 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
             )
         }
 
+        // Indexed target paragraph selection (e.g. "copy the third paragraph")
+        if let requestedIndex = targetIndex {
+            guard requestedIndex >= 1 else {
+                return CommandExecutionResult(
+                    success: false,
+                    message: "Invalid paragraph index: \(requestedIndex)"
+                )
+            }
+
+            if requestedIndex <= paragraphs.count {
+                let paragraph = paragraphs[requestedIndex - 1]
+                let success = context.clipboardManager.setString(paragraph.text)
+                if success {
+                    return CommandExecutionResult(
+                        success: true,
+                        message: "Copied paragraph \(requestedIndex) to clipboard: \"\(paragraph.text.prefix(40))...\""
+                    )
+                } else {
+                    return CommandExecutionResult(
+                        success: false,
+                        message: "Failed to set clipboard content"
+                    )
+                }
+            } else {
+                return CommandExecutionResult(
+                    success: false,
+                    message: "Only \(paragraphs.count) visible paragraph\(paragraphs.count == 1 ? "" : "s") found."
+                )
+            }
+        }
+
+        // Generic single-paragraph resolution (e.g. "copy the paragraph")
         if paragraphs.count == 1 {
             let paragraph = paragraphs[0]
             let success = context.clipboardManager.setString(paragraph.text)
@@ -160,7 +201,7 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
 
         return CommandExecutionResult(
             success: false,
-            message: "Multiple paragraphs visible (\(paragraphs.count)). Please specify which paragraph."
+            message: "Multiple paragraphs visible (\(paragraphs.count)). Please specify which paragraph (e.g. 'copy the first paragraph')."
         )
     }
 

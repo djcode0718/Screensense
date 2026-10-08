@@ -150,4 +150,36 @@ final class CoordinatorTests: XCTestCase {
             XCTFail("Expected .executed state, got \(sut.coordinator.state)")
         }
     }
+
+    @MainActor
+    func testCoordinatorVoiceToCopyThirdParagraphExecutionFlow() async throws {
+        let sut = makeSUT()
+        sut.coordinator.start()
+
+        // 5 visible paragraphs
+        let p1 = VisibleElement(id: "p-1", type: .paragraph, text: "This is ScreenSense paragraph one.", bounds: ElementBounds(x: 50, y: 100, width: 600, height: 40), tag: "p")
+        let p2 = VisibleElement(id: "p-2", type: .paragraph, text: "This is ScreenSense paragraph two.", bounds: ElementBounds(x: 50, y: 160, width: 600, height: 40), tag: "p")
+        let p3 = VisibleElement(id: "p-3", type: .paragraph, text: "This is ScreenSense paragraph three.", bounds: ElementBounds(x: 50, y: 220, width: 600, height: 40), tag: "p")
+        let p4 = VisibleElement(id: "p-4", type: .paragraph, text: "This is ScreenSense paragraph four.", bounds: ElementBounds(x: 50, y: 280, width: 600, height: 40), tag: "p")
+        let p5 = VisibleElement(id: "p-5", type: .paragraph, text: "This is ScreenSense paragraph five.", bounds: ElementBounds(x: 50, y: 340, width: 600, height: 40), tag: "p")
+
+        let ctx = VisibleContext(source: .dom, viewport: ViewportInfo(width: 1440, height: 900), elements: [p1, p2, p3, p4, p5])
+        sut.bridge.updateContext(ctx)
+
+        sut.coordinator.startListening()
+        XCTAssertTrue(sut.mockVoice.isListening)
+
+        // Voice says "copy the third paragraph"
+        sut.mockVoice.simulateFinish(result: .success("copy the third paragraph"))
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(sut.mockClipboard.getString(), "This is ScreenSense paragraph three.")
+        if case .executed(let cmd, let msg) = sut.coordinator.state {
+            XCTAssertTrue(cmd.contains("Copy Paragraph #3"))
+            XCTAssertTrue(msg.contains("Copied paragraph 3"))
+        } else {
+            XCTFail("Expected .executed state, got \(sut.coordinator.state)")
+        }
+    }
 }

@@ -98,6 +98,43 @@ final class CommandParserTests: XCTestCase {
         }
     }
 
+    func testCopyIndexedParagraphCommandParsing() {
+        let indexedCases: [(phrase: String, expectedIndex: Int)] = [
+            ("copy the first paragraph", 1),
+            ("Copy the first paragraph", 1),
+            ("copy the 1st paragraph", 1),
+            ("copy paragraph 1", 1),
+            ("copy the second paragraph", 2),
+            ("copy second paragraph", 2),
+            ("copy the 2nd paragraph", 2),
+            ("copy paragraph 2", 2),
+            ("copy the third paragraph", 3),
+            ("Copy the third paragraph", 3),
+            ("copy third paragraph", 3),
+            ("copy the 3rd paragraph", 3),
+            ("copy paragraph 3", 3),
+            ("please copy the third paragraph", 3),
+            ("can you copy the 3rd paragraph", 3),
+            ("copy the fourth paragraph", 4),
+            ("copy paragraph 4", 4),
+            ("copy the 4th paragraph", 4),
+            ("copy the fifth paragraph", 5),
+            ("copy paragraph 5", 5),
+            ("copy the 5th paragraph", 5)
+        ]
+
+        for (phrase, expectedIndex) in indexedCases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Paragraph #\(expectedIndex)", "Expected description 'Copy Paragraph #\(expectedIndex)' for '\(phrase)'")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as indexed copy paragraph command")
+            }
+        }
+    }
+
     func testEmptyTranscript() {
         let emptyCases = ["", "   ", "...", " , ! ? "]
         for empty in emptyCases {
