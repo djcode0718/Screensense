@@ -135,6 +135,137 @@ final class CommandParserTests: XCTestCase {
         }
     }
 
+    func testCopyHeadingCommandParsing() {
+        let genericPhrases = [
+            "copy the heading",
+            "copy heading",
+            "Copy Heading!",
+            "please copy the heading",
+            "copy this heading",
+            "copy that heading"
+        ]
+
+        for phrase in genericPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Heading")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as copy heading command")
+            }
+        }
+
+        let indexedPhrases: [(phrase: String, expectedIndex: Int)] = [
+            ("copy the first heading", 1),
+            ("copy first heading", 1),
+            ("copy the 1st heading", 1),
+            ("copy heading 1", 1),
+            ("copy the second heading", 2),
+            ("copy second heading", 2),
+            ("copy heading 2", 2),
+            ("copy the 2nd heading", 2),
+            ("please copy the second heading", 2)
+        ]
+
+        for (phrase, expectedIndex) in indexedPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Heading #\(expectedIndex)")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as indexed copy heading command")
+            }
+        }
+    }
+
+    func testCopyButtonCommandParsing() {
+        let genericPhrases = [
+            "copy the button",
+            "copy button",
+            "Copy Button!",
+            "please copy the button",
+            "can you copy the button"
+        ]
+
+        for phrase in genericPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Button")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as copy button command")
+            }
+        }
+
+        let indexedPhrases: [(phrase: String, expectedIndex: Int)] = [
+            ("copy the first button", 1),
+            ("copy first button", 1),
+            ("copy button 1", 1),
+            ("copy the second button", 2),
+            ("copy second button", 2),
+            ("copy button 2", 2),
+            ("copy the 2nd button", 2),
+            ("can you copy button 2", 2)
+        ]
+
+        for (phrase, expectedIndex) in indexedPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Button #\(expectedIndex)")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as indexed copy button command")
+            }
+        }
+    }
+
+    func testCopyLinkCommandParsing() {
+        let genericPhrases = [
+            "copy the link",
+            "copy link",
+            "Copy Link!",
+            "please copy the link"
+        ]
+
+        for phrase in genericPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Link")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as copy link command")
+            }
+        }
+
+        let indexedPhrases: [(phrase: String, expectedIndex: Int)] = [
+            ("copy the first link", 1),
+            ("copy first link", 1),
+            ("copy the second link", 2),
+            ("copy link 2", 2),
+            ("copy the 2nd link", 2),
+            ("copy the third link", 3),
+            ("copy link 3", 3),
+            ("copy the 3rd link", 3),
+            ("please copy the third link", 3)
+        ]
+
+        for (phrase, expectedIndex) in indexedPhrases {
+            let result = parser.parse(transcript: phrase)
+            switch result {
+            case .success(let command):
+                XCTAssertEqual(command.actionType, .copy, "Expected .copy for '\(phrase)'")
+                XCTAssertEqual(command.description, "Copy Link #\(expectedIndex)")
+            default:
+                XCTFail("Failed to parse '\(phrase)' as indexed copy link command")
+            }
+        }
+    }
+
     func testEmptyTranscript() {
         let emptyCases = ["", "   ", "...", " , ! ? "]
         for empty in emptyCases {

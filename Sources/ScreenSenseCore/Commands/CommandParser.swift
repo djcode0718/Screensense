@@ -19,8 +19,8 @@ public final class DeterministicCommandParser: CommandParserProtocol {
             return .success(command: pasteCmd.toAnyCommand())
         }
 
-        // Check for Copy Paragraph command patterns
-        if let copyCmd = parseCopyParagraphCommand(normalized, rawTranscript: transcript) {
+        // Check for Copy Element command patterns (heading, button, link, paragraph)
+        if let copyCmd = parseCopyElementCommand(normalized, rawTranscript: transcript) {
             return .success(command: copyCmd.toAnyCommand())
         }
 
@@ -29,6 +29,21 @@ public final class DeterministicCommandParser: CommandParserProtocol {
             reason: "Command not recognized: \"\(transcript)\""
         )
     }
+
+    private static let elementNounMap: [String: ElementType] = [
+        "heading": .heading,
+        "headings": .heading,
+        "header": .heading,
+        "headers": .heading,
+        "title": .heading,
+        "titles": .heading,
+        "button": .button,
+        "buttons": .button,
+        "link": .link,
+        "links": .link,
+        "paragraph": .paragraph,
+        "paragraphs": .paragraph
+    ]
 
     private static let ordinalMap: [String: Int] = [
         "first": 1, "1st": 1, "one": 1, "1": 1,
@@ -43,50 +58,55 @@ public final class DeterministicCommandParser: CommandParserProtocol {
         "tenth": 10, "10th": 10, "ten": 10, "10": 10
     ]
 
-    private func parseCopyParagraphCommand(_ normalized: String, rawTranscript: String) -> CopyParagraphCommand? {
+    private func parseCopyElementCommand(_ normalized: String, rawTranscript: String) -> CopyElementCommand? {
         let words = normalized.components(separatedBy: " ").filter { !$0.isEmpty }
-        let fillerWords: Set<String> = ["please", "hey", "can", "you", "just", "screensense", "now", "would", "could", "will"]
+        let fillerWords: Set<String> = ["please", "hey", "can", "you", "just", "screensense", "now", "would", "could", "will", "do"]
         let cleanedWords = words.filter { !fillerWords.contains($0) }
 
-        guard !cleanedWords.isEmpty else { return nil }
+        guard let first = cleanedWords.first, first == "copy" else { return nil }
+        let tokens = Array(cleanedWords.dropFirst())
+        guard !tokens.isEmpty else { return nil }
 
-        // Generic single paragraph patterns: ["copy", "the", "paragraph"], ["copy", "paragraph"], ["copy", "this", "paragraph"], ["copy", "that", "paragraph"]
-        if cleanedWords == ["copy", "the", "paragraph"] ||
-           cleanedWords == ["copy", "paragraph"] ||
-           cleanedWords == ["copy", "this", "paragraph"] ||
-           cleanedWords == ["copy", "that", "paragraph"] {
-            return CopyParagraphCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetIndex: nil)
+        let articles: Set<String> = ["the", "this", "that", "a", "an"]
+
+        // Pattern 1: [NOUN] -> e.g. ["heading"], ["button"], ["link"], ["paragraph"]
+        if tokens.count == 1, let type = Self.elementNounMap[tokens[0]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: nil)
         }
 
-        // Pattern 1: ["copy", "the", "<ORDINAL>", "paragraph"]
-        if cleanedWords.count == 4 && cleanedWords[0] == "copy" && cleanedWords[1] == "the" && cleanedWords[3] == "paragraph" {
-            let ordinalKey = cleanedWords[2]
-            if let index = Self.ordinalMap[ordinalKey] {
-                return CopyParagraphCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetIndex: index)
-            }
+        // Pattern 2: [ARTICLE, NOUN] -> e.g. ["the", "heading"], ["this", "button"]
+        if tokens.count == 2, articles.contains(tokens[0]), let type = Self.elementNounMap[tokens[1]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: nil)
         }
 
-        // Pattern 2: ["copy", "<ORDINAL>", "paragraph"]
-        if cleanedWords.count == 3 && cleanedWords[0] == "copy" && cleanedWords[2] == "paragraph" {
-            let ordinalKey = cleanedWords[1]
-            if let index = Self.ordinalMap[ordinalKey] {
-                return CopyParagraphCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetIndex: index)
-            }
+        // Pattern 3: [ORDINAL, NOUN] -> e.g. ["first", "heading"], ["2nd", "button"]
+        if tokens.count == 2, let idx = Self.ordinalMap[tokens[0]], let type = Self.elementNounMap[tokens[1]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: idx)
         }
 
-        // Pattern 3: ["copy", "paragraph", "<ORDINAL/CARDINAL>"] or ["copy", "the", "paragraph", "<ORDINAL/CARDINAL>"]
-        if cleanedWords.count == 3 && cleanedWords[0] == "copy" && cleanedWords[1] == "paragraph" {
-            let ordinalKey = cleanedWords[2]
-            if let index = Self.ordinalMap[ordinalKey] {
-                return CopyParagraphCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetIndex: index)
-            }
+        // Pattern 4: [ARTICLE, ORDINAL, NOUN] -> e.g. ["the", "first", "heading"], ["the", "2nd", "button"]
+        if tokens.count == 3, articles.contains(tokens[0]), let idx = Self.ordinalMap[tokens[1]], let type = Self.elementNounMap[tokens[2]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: idx)
         }
 
-        if cleanedWords.count == 4 && cleanedWords[0] == "copy" && cleanedWords[1] == "the" && cleanedWords[2] == "paragraph" {
-            let ordinalKey = cleanedWords[3]
-            if let index = Self.ordinalMap[ordinalKey] {
-                return CopyParagraphCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetIndex: index)
-            }
+        // Pattern 5: [NOUN, ORDINAL] -> e.g. ["heading", "2"], ["button", "two"], ["link", "3"]
+        if tokens.count == 2, let type = Self.elementNounMap[tokens[0]], let idx = Self.ordinalMap[tokens[1]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: idx)
+        }
+
+        // Pattern 6: [ARTICLE, NOUN, ORDINAL] -> e.g. ["the", "heading", "2"], ["the", "link", "3"]
+        if tokens.count == 3, articles.contains(tokens[0]), let type = Self.elementNounMap[tokens[1]], let idx = Self.ordinalMap[tokens[2]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: idx)
+        }
+
+        // Pattern 7: [NOUN, "number", ORDINAL] -> e.g. ["heading", "number", "2"]
+        if tokens.count == 3, tokens[1] == "number", let type = Self.elementNounMap[tokens[0]], let idx = Self.ordinalMap[tokens[2]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: idx)
+        }
+
+        // Pattern 8: [ARTICLE, NOUN, "number", ORDINAL] -> e.g. ["the", "link", "number", "3"]
+        if tokens.count == 4, articles.contains(tokens[0]), tokens[2] == "number", let type = Self.elementNounMap[tokens[1]], let idx = Self.ordinalMap[tokens[3]] {
+            return CopyElementCommand(rawTranscript: rawTranscript, normalizedTranscript: normalized, targetType: type, targetIndex: idx)
         }
 
         return nil

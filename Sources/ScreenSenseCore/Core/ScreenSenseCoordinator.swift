@@ -175,7 +175,18 @@ public final class ScreenSenseCoordinator: ObservableObject {
     public func processTranscript(_ transcript: String) {
         state = .processing(transcript: transcript)
 
+        let normalized = StringNormalizer.normalize(transcript)
+        let parserName = String(describing: type(of: commandParser))
         let parseResult = commandParser.parse(transcript: transcript)
+
+        ScreenSenseLogger.parser.info("""
+        [DEBUG RUNTIME PARSER]
+        RAW SPEECH: '\(transcript, privacy: .public)'
+        NORMALIZED SPEECH: '\(normalized, privacy: .public)'
+        PARSER: \(parserName, privacy: .public)
+        PARSED COMMAND: \(String(describing: parseResult), privacy: .public)
+        """)
+
         switch parseResult {
         case .success(let command):
             lastCommandDescription = command.description

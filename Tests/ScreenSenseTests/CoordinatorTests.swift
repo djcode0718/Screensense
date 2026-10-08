@@ -182,4 +182,43 @@ final class CoordinatorTests: XCTestCase {
             XCTFail("Expected .executed state, got \(sut.coordinator.state)")
         }
     }
+
+    @MainActor
+    func testCoordinatorVoiceToCopyHeadingButtonLinkExecutionFlow() async throws {
+        let sut = makeSUT()
+        sut.coordinator.start()
+
+        let h1 = VisibleElement(id: "h-1", type: .heading, text: "Heading One", bounds: ElementBounds(x: 50, y: 50, width: 400, height: 40), tag: "h1")
+        let h2 = VisibleElement(id: "h-2", type: .heading, text: "Heading Two", bounds: ElementBounds(x: 50, y: 150, width: 400, height: 40), tag: "h2")
+        let b1 = VisibleElement(id: "b-1", type: .button, text: "Button One", bounds: ElementBounds(x: 50, y: 250, width: 120, height: 40), tag: "button")
+        let b2 = VisibleElement(id: "b-2", type: .button, text: "Button Two", bounds: ElementBounds(x: 180, y: 250, width: 120, height: 40), tag: "button")
+        let l1 = VisibleElement(id: "l-1", type: .link, text: "Link One", bounds: ElementBounds(x: 50, y: 350, width: 100, height: 30), tag: "a")
+        let l2 = VisibleElement(id: "l-2", type: .link, text: "Link Two", bounds: ElementBounds(x: 160, y: 350, width: 100, height: 30), tag: "a")
+        let l3 = VisibleElement(id: "l-3", type: .link, text: "Link Three", bounds: ElementBounds(x: 270, y: 350, width: 100, height: 30), tag: "a")
+
+        let ctx = VisibleContext(source: .dom, viewport: ViewportInfo(width: 1440, height: 900), elements: [h1, h2, b1, b2, l1, l2, l3])
+        sut.bridge.updateContext(ctx)
+
+        let testCommands: [(voice: String, expectedText: String, expectedCmd: String)] = [
+            ("Copy the first heading", "Heading One", "Copy Heading #1"),
+            ("Copy heading 2", "Heading Two", "Copy Heading #2"),
+            ("Copy the first button", "Button One", "Copy Button #1"),
+            ("Copy button 2", "Button Two", "Copy Button #2"),
+            ("Copy the third link", "Link Three", "Copy Link #3"),
+            ("Copy link 3", "Link Three", "Copy Link #3")
+        ]
+
+        for test in testCommands {
+            sut.coordinator.startListening()
+            sut.mockVoice.simulateFinish(result: .success(test.voice))
+            try await Task.sleep(nanoseconds: 80_000_000)
+
+            XCTAssertEqual(sut.mockClipboard.getString(), test.expectedText, "Mismatch for voice input '\(test.voice)'")
+            if case .executed(let cmd, _) = sut.coordinator.state {
+                XCTAssertTrue(cmd.contains(test.expectedCmd), "Expected command containing '\(test.expectedCmd)' for '\(test.voice)', got '\(cmd)'")
+            } else {
+                XCTFail("Expected .executed state for '\(test.voice)', got \(sut.coordinator.state)")
+            }
+        }
+    }
 }

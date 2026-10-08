@@ -106,23 +106,31 @@ public struct PasteCommand: Command, Equatable, Sendable {
     }
 }
 
-/// Specific implementation of Copy Paragraph Command
-public struct CopyParagraphCommand: Command, Equatable, Sendable {
+/// Specific implementation of Copy Element Command (headings, buttons, links, paragraphs)
+public struct CopyElementCommand: Command, Equatable, Sendable {
     public let actionType: CommandActionType = .copy
     public let rawTranscript: String
     public let normalizedTranscript: String
-    public let targetIndex: Int? // 1-based index (e.g. 1 = first, 3 = third, nil = generic)
+    public let targetType: ElementType // .heading, .button, .link, .paragraph
+    public let targetIndex: Int? // 1-based index (e.g. 1 = first, 2 = second, nil = generic)
 
     public var description: String {
+        let typeName = targetType.rawValue.capitalized
         if let idx = targetIndex {
-            return "Copy Paragraph #\(idx)"
+            return "Copy \(typeName) #\(idx)"
         }
-        return "Copy Paragraph"
+        return "Copy \(typeName)"
     }
 
-    public init(rawTranscript: String, normalizedTranscript: String, targetIndex: Int? = nil) {
+    public init(
+        rawTranscript: String,
+        normalizedTranscript: String,
+        targetType: ElementType,
+        targetIndex: Int? = nil
+    ) {
         self.rawTranscript = rawTranscript
         self.normalizedTranscript = normalizedTranscript
+        self.targetType = targetType
         self.targetIndex = targetIndex
     }
 
@@ -142,31 +150,59 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
         }
 
         // Preserve visual reading order
-        let paragraphs = domContext.spatiallySortedElements.filter { $0.type == .paragraph || $0.tag?.lowercased() == "p" }
+        let sorted = domContext.spatiallySortedElements
 
-        if paragraphs.isEmpty {
+        let matchingElements: [VisibleElement]
+        switch targetType {
+        case .heading:
+            matchingElements = sorted.filter {
+                $0.type == .heading ||
+                ["h1", "h2", "h3", "h4", "h5", "h6"].contains($0.tag?.lowercased())
+            }
+        case .button:
+            matchingElements = sorted.filter {
+                $0.type == .button ||
+                $0.tag?.lowercased() == "button"
+            }
+        case .link:
+            matchingElements = sorted.filter {
+                $0.type == .link ||
+                $0.tag?.lowercased() == "a"
+            }
+        case .paragraph:
+            matchingElements = sorted.filter {
+                $0.type == .paragraph ||
+                $0.tag?.lowercased() == "p"
+            }
+        default:
+            matchingElements = sorted.filter { $0.type == targetType }
+        }
+
+        let typeNoun = targetType.rawValue
+
+        if matchingElements.isEmpty {
             return CommandExecutionResult(
                 success: false,
-                message: "No visible paragraph found"
+                message: "No visible \(typeNoun) found"
             )
         }
 
-        // Indexed target paragraph selection (e.g. "copy the third paragraph")
+        // Indexed target element selection (e.g. "copy the second button")
         if let requestedIndex = targetIndex {
             guard requestedIndex >= 1 else {
                 return CommandExecutionResult(
                     success: false,
-                    message: "Invalid paragraph index: \(requestedIndex)"
+                    message: "Invalid \(typeNoun) index: \(requestedIndex)"
                 )
             }
 
-            if requestedIndex <= paragraphs.count {
-                let paragraph = paragraphs[requestedIndex - 1]
-                let success = context.clipboardManager.setString(paragraph.text)
+            if requestedIndex <= matchingElements.count {
+                let element = matchingElements[requestedIndex - 1]
+                let success = context.clipboardManager.setString(element.text)
                 if success {
                     return CommandExecutionResult(
                         success: true,
-                        message: "Copied paragraph \(requestedIndex) to clipboard: \"\(paragraph.text.prefix(40))...\""
+                        message: "Copied \(typeNoun) \(requestedIndex) to clipboard: \"\(element.text.prefix(40))...\""
                     )
                 } else {
                     return CommandExecutionResult(
@@ -175,21 +211,22 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
                     )
                 }
             } else {
+                let plural = matchingElements.count == 1 ? "" : "s"
                 return CommandExecutionResult(
                     success: false,
-                    message: "Only \(paragraphs.count) visible paragraph\(paragraphs.count == 1 ? "" : "s") found."
+                    message: "Only \(matchingElements.count) visible \(typeNoun)\(plural) found."
                 )
             }
         }
 
-        // Generic single-paragraph resolution (e.g. "copy the paragraph")
-        if paragraphs.count == 1 {
-            let paragraph = paragraphs[0]
-            let success = context.clipboardManager.setString(paragraph.text)
+        // Generic single-element resolution (e.g. "copy the button")
+        if matchingElements.count == 1 {
+            let element = matchingElements[0]
+            let success = context.clipboardManager.setString(element.text)
             if success {
                 return CommandExecutionResult(
                     success: true,
-                    message: "Copied paragraph to clipboard: \"\(paragraph.text.prefix(40))...\""
+                    message: "Copied \(typeNoun) to clipboard: \"\(element.text.prefix(40))...\""
                 )
             } else {
                 return CommandExecutionResult(
@@ -199,9 +236,10 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
             }
         }
 
+        let pluralNoun = typeNoun.hasSuffix("s") ? typeNoun : "\(typeNoun)s"
         return CommandExecutionResult(
             success: false,
-            message: "Multiple paragraphs visible (\(paragraphs.count)). Please specify which paragraph (e.g. 'copy the first paragraph')."
+            message: "Multiple \(pluralNoun) visible (\(matchingElements.count)). Please specify which \(typeNoun) (e.g. 'copy the first \(typeNoun)')."
         )
     }
 
@@ -215,6 +253,34 @@ public struct CopyParagraphCommand: Command, Equatable, Sendable {
                 try await self.execute(context: context)
             }
         )
+    }
+}
+
+/// Backward compatibility alias / helper for CopyParagraphCommand
+public struct CopyParagraphCommand: Command, Equatable, Sendable {
+    private let underlying: CopyElementCommand
+
+    public var actionType: CommandActionType { underlying.actionType }
+    public var rawTranscript: String { underlying.rawTranscript }
+    public var normalizedTranscript: String { underlying.normalizedTranscript }
+    public var targetIndex: Int? { underlying.targetIndex }
+    public var description: String { underlying.description }
+
+    public init(rawTranscript: String, normalizedTranscript: String, targetIndex: Int? = nil) {
+        self.underlying = CopyElementCommand(
+            rawTranscript: rawTranscript,
+            normalizedTranscript: normalizedTranscript,
+            targetType: .paragraph,
+            targetIndex: targetIndex
+        )
+    }
+
+    public func execute(context: CommandExecutionContext) async throws -> CommandExecutionResult {
+        try await underlying.execute(context: context)
+    }
+
+    public func toAnyCommand() -> AnyCommand {
+        underlying.toAnyCommand()
     }
 }
 
