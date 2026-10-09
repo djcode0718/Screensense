@@ -155,21 +155,96 @@
     });
   }
 
-  // 6. Explicit extraction requests from service worker or popup
+  // 6. Explicit extraction and Live Query requests from service worker or popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'extract_visible_context') {
-      console.log('[SS-TAB-SYNC] Received extract_visible_context request on:', window.location.href);
+    const reqId = message.requestId || 'unknown';
+
+    if (message.action === 'extract_visible_context' || message.action === 'live_query_dom') {
+      console.log(`[SS-LIVEQUERY] Content script received requestId=${reqId} action=${message.action}`);
       try {
         if (!window.ScreenSenseDOMAnalyzer) {
           throw new Error('ScreenSenseDOMAnalyzer not loaded in page context');
         }
         const context = window.ScreenSenseDOMAnalyzer.extractVisibleContext();
-        console.log(`[SS-TAB-SYNC] extract_visible_context responding with ${context.elements.length} elements from '${context.viewport.pageTitle || 'page'}'`);
-        sendResponse({ success: true, context });
+        console.log(`[SS-LIVEQUERY] DOM target resolved requestId=${reqId} (elements=${context.elements.length})`);
+        sendResponse({ success: true, context, domResult: context });
       } catch (error) {
-        console.error('[SS-TAB-SYNC] extract_visible_context error:', error);
+        console.error(`[SS-LIVEQUERY] ${message.action} error requestId=${reqId}:`, error);
         sendResponse({ success: false, error: error.message });
       }
+      return true;
+    }
+
+    if (message.action === 'live_query_pointer') {
+      console.log(`[SS-LIVEQUERY] Content script received requestId=${reqId} action=live_query_pointer`);
+      try {
+        if (!window.ScreenSenseDOMAnalyzer) {
+          throw new Error('ScreenSenseDOMAnalyzer not loaded in page context');
+        }
+        const lastPointer = window.__SCREENSENSE_LAST_POINTER__;
+        let x = lastPointer?.x;
+        let y = lastPointer?.y;
+
+        // If coordinates provided in message parameters, prefer them
+        if (typeof message.parameters?.x === 'number') x = message.parameters.x;
+        if (typeof message.parameters?.y === 'number') y = message.parameters.y;
+
+        if (typeof x !== 'number' || typeof y !== 'number') {
+          // Default to center of viewport if pointer coordinates never recorded
+          x = Math.round(window.innerWidth / 2);
+          y = Math.round(window.innerHeight / 2);
+        }
+
+        console.log(`[SS-LIVEQUERY] Pointer coordinates x=${x} y=${y}`);
+
+        const pointerResult = window.ScreenSenseDOMAnalyzer.getElementAtPoint(x, y);
+        console.log(`[SS-LIVEQUERY] DOM target resolved requestId=${reqId} status=${pointerResult.status}`);
+        sendResponse({
+          success: true,
+          pointerResult: pointerResult
+        });
+      } catch (error) {
+        console.error(`[SS-LIVEQUERY] live_query_pointer error requestId=${reqId}:`, error);
+        sendResponse({ success: false, error: error.message });
+      }
+      return true;
+    }
+
+    if (message.action === 'live_query_selection') {
+      console.log(`[SS-LIVEQUERY] Content script received requestId=${reqId} action=live_query_selection`);
+      try {
+        if (!window.ScreenSenseDOMAnalyzer) {
+          throw new Error('ScreenSenseDOMAnalyzer not loaded in page context');
+        }
+        const selectionResult = window.ScreenSenseDOMAnalyzer.getActiveSelectionDetails();
+        console.log(`[SS-LIVEQUERY] DOM target resolved requestId=${reqId} status=${selectionResult.status} textLen=${selectionResult.text?.length || 0}`);
+        sendResponse({
+          success: true,
+          selectionResult: selectionResult
+        });
+      } catch (error) {
+        console.error(`[SS-LIVEQUERY] live_query_selection error requestId=${reqId}:`, error);
+        sendResponse({ success: false, error: error.message });
+      }
+      return true;
+    }
+
+    if (message.action === 'live_query_tab') {
+      console.log(`[SS-LIVEQUERY] Content script received requestId=${reqId} action=live_query_tab`);
+      const viewportInfo = {
+        width: window.innerWidth || document.documentElement.clientWidth,
+        height: window.innerHeight || document.documentElement.clientHeight,
+        scrollX: Math.round(window.scrollX * 10) / 10,
+        scrollY: Math.round(window.scrollY * 10) / 10,
+        devicePixelRatio: window.devicePixelRatio || 1.0,
+        pageTitle: document.title || null,
+        url: window.location.href || null
+      };
+      sendResponse({
+        success: true,
+        viewport: viewportInfo,
+        documentReadyState: document.readyState
+      });
       return true;
     }
   });

@@ -13,6 +13,10 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
     private var _onContextReceived: (@Sendable (VisibleContext) -> Void)?
     private let port: UInt16
 
+    private var pendingQueryContinuations: [String: CheckedContinuation<LiveQueryResponse, Error>] = [:]
+    private var waitingChannelConnections: [NWConnection] = []
+    private var queuedRequests: [LiveQueryRequest] = []
+
     public var onContextReceived: (@Sendable (VisibleContext) -> Void)? {
         get {
             lock.lock()
@@ -82,6 +86,17 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         lock.lock()
         defer { lock.unlock() }
 
+        for (_, cont) in pendingQueryContinuations {
+            cont.resume(throwing: LiveQueryError.liveQueryFailed("Bridge stopped"))
+        }
+        pendingQueryContinuations.removeAll()
+
+        for conn in waitingChannelConnections {
+            sendHTTPResponse(connection: conn, statusCode: 204, body: "")
+        }
+        waitingChannelConnections.removeAll()
+        queuedRequests.removeAll()
+
         listener?.cancel()
         listener = nil
         ScreenSenseLogger.app.info("LocalBrowserBridge stopped")
@@ -102,6 +117,114 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         ScreenSenseLogger.app.info("[SS-TAB-SYNC] ScreenSense LocalBrowserBridge.updateContext() received \(context.elements.count) elements from tabId=\(tabId, privacy: .public) windowId=\(windowId, privacy: .public) '\(pageTitle, privacy: .public)' (url: \(url, privacy: .public)) timestamp: \(context.timestamp, privacy: .public)")
         ScreenSenseLogger.app.info("[SS-VIEWPORT-SYNC] Swift context received scrollY=\(Int(context.viewport.scrollY)) elements=\(context.elements.count)")
         handler?(context)
+    }
+
+    // MARK: - Live Query Protocol Conformance
+
+    public func queryActiveTab(timeout: TimeInterval = 0.8) async throws -> LiveQueryResponse {
+        let req = LiveQueryRequest(type: .activeTab)
+        return try await sendLiveQuery(req, timeout: timeout)
+    }
+
+    public func queryActivePointer(timeout: TimeInterval = 0.8) async throws -> LivePointerResult {
+        let req = LiveQueryRequest(type: .activePointer)
+        let response = try await sendLiveQuery(req, timeout: timeout)
+        guard let pointerRes = response.pointerResult else {
+            if response.status == "POINTER_UNAVAILABLE" {
+                throw LiveQueryError.pointerUnavailable
+            }
+            if response.status == "CONTENT_SCRIPT_UNAVAILABLE" {
+                throw LiveQueryError.liveQueryFailed("Content script unavailable: \(response.error ?? "Could not establish connection")")
+            }
+            if response.status == "NO_ACTIVE_CHROME_TAB" {
+                throw LiveQueryError.liveQueryFailed("No active Chrome tab found: \(response.error ?? "none")")
+            }
+            throw LiveQueryError.liveQueryFailed(response.error ?? "No pointer data returned")
+        }
+        return pointerRes
+    }
+
+    public func queryActiveSelection(timeout: TimeInterval = 0.8) async throws -> LiveSelectionResult {
+        let req = LiveQueryRequest(type: .activeSelection)
+        let response = try await sendLiveQuery(req, timeout: timeout)
+        guard let selectionRes = response.selectionResult else {
+            if response.status == "NO_ACTIVE_SELECTION" {
+                return LiveSelectionResult(status: "NO_ACTIVE_SELECTION", text: "", isCollapsed: true)
+            }
+            if response.status == "CONTENT_SCRIPT_UNAVAILABLE" {
+                throw LiveQueryError.liveQueryFailed("Content script unavailable: \(response.error ?? "Could not establish connection")")
+            }
+            if response.status == "NO_ACTIVE_CHROME_TAB" {
+                throw LiveQueryError.liveQueryFailed("No active Chrome tab found: \(response.error ?? "none")")
+            }
+            throw LiveQueryError.liveQueryFailed(response.error ?? "No selection data returned")
+        }
+        return selectionRes
+    }
+
+    public func queryActiveDOM(timeout: TimeInterval = 1.0) async throws -> VisibleContext {
+        let req = LiveQueryRequest(type: .activeDOM)
+        let response = try await sendLiveQuery(req, timeout: timeout)
+        guard let domRes = response.domResult else {
+            throw LiveQueryError.liveQueryFailed(response.error ?? "No DOM data returned")
+        }
+        // Update cached context with fresh live DOM
+        updateContext(domRes)
+        return domRes
+    }
+
+    private func synchronized<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
+    public func sendLiveQuery(_ request: LiveQueryRequest, timeout: TimeInterval) async throws -> LiveQueryResponse {
+        let startTime = Date()
+        ScreenSenseLogger.app.info("[SS-LIVEQUERY] Swift request created requestId=\(request.requestId, privacy: .public)")
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let reqData = try encoder.encode(request)
+        guard let reqJson = String(data: reqData, encoding: .utf8) else {
+            throw LiveQueryError.liveQueryFailed("Encoding failed")
+        }
+
+        // Check if there is an active waiting connection from Chrome extension
+        let waitingConn: NWConnection? = synchronized {
+            if !self.waitingChannelConnections.isEmpty {
+                return self.waitingChannelConnections.removeFirst()
+            } else {
+                self.queuedRequests.append(request)
+                return nil
+            }
+        }
+
+        if let conn = waitingConn {
+            ScreenSenseLogger.app.info("[SS-LIVEQUERY] Pending endpoint delivered requestId=\(request.requestId, privacy: .public)")
+            sendHTTPResponse(connection: conn, statusCode: 200, body: reqJson)
+        } else {
+            ScreenSenseLogger.app.info("[SS-LIVEQUERY] Bridge queued request requestId=\(request.requestId, privacy: .public)")
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            self.synchronized {
+                self.pendingQueryContinuations[request.requestId] = continuation
+            }
+
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                let timedOutCont: CheckedContinuation<LiveQueryResponse, Error>? = self.synchronized {
+                    self.pendingQueryContinuations.removeValue(forKey: request.requestId)
+                }
+
+                if let cont = timedOutCont {
+                    let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000)
+                    ScreenSenseLogger.app.error("[SS-LIVEQUERY] QUERY TIMEOUT requestId=\(request.requestId, privacy: .public) elapsedMs=\(elapsedMs)")
+                    cont.resume(throwing: LiveQueryError.queryTimeout)
+                }
+            }
+        }
     }
 
     private func handleIncomingConnection(_ connection: NWConnection) {
@@ -199,6 +322,143 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
             """
             sendHTTPResponse(connection: connection, statusCode: 200, body: statusJson)
             return
+        }
+
+        // Diagnostic Channel Status: GET /api/debug/channel-status
+        if path == "/api/debug/channel-status" && method == "GET" {
+            self.lock.lock()
+            let waitingCount = self.waitingChannelConnections.count
+            let queuedCount = self.queuedRequests.count
+            let pendingCount = self.pendingQueryContinuations.count
+            self.lock.unlock()
+            let statusJson = """
+            {"status":"ok","connected":\(waitingCount > 0),"waitingConnections":\(waitingCount),"queuedRequests":\(queuedCount),"pendingContinuations":\(pendingCount)}
+            """
+            sendHTTPResponse(connection: connection, statusCode: 200, body: statusJson)
+            return
+        }
+
+        // Diagnostic Pointer Query: GET /api/debug/query-pointer
+        if path == "/api/debug/query-pointer" && method == "GET" {
+            Task { [weak self] in
+                guard let self = self else { return }
+                do {
+                    let ptr = try await self.queryActivePointer(timeout: 2.0)
+                    let encoder = JSONEncoder()
+                    if let data = try? encoder.encode(ptr), let str = String(data: data, encoding: .utf8) {
+                        self.sendHTTPResponse(connection: connection, statusCode: 200, body: str)
+                    } else {
+                        self.sendHTTPResponse(connection: connection, statusCode: 200, body: "{\"status\":\"\(ptr.status)\"}")
+                    }
+                } catch {
+                    self.sendHTTPResponse(connection: connection, statusCode: 500, body: "{\"error\":\"\(error.localizedDescription)\"}")
+                }
+            }
+            return
+        }
+
+        // Live Query Channel Polling: GET /api/query/pending
+        if path == "/api/query/pending" && method == "GET" {
+            self.lock.lock()
+            self._lastConnectedAt = Date()
+
+            if !self.queuedRequests.isEmpty {
+                let req = self.queuedRequests.removeFirst()
+                self.lock.unlock()
+
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .iso8601
+                if let encoded = try? encoder.encode(req), let json = String(data: encoded, encoding: .utf8) {
+                    ScreenSenseLogger.app.info("[SS-LIVEQUERY] Pending endpoint delivered requestId=\(req.requestId, privacy: .public)")
+                    self.sendHTTPResponse(connection: connection, statusCode: 200, body: json)
+                } else {
+                    self.sendHTTPResponse(connection: connection, statusCode: 500, body: "{\"error\":\"Encoding error\"}")
+                }
+            } else {
+                // Monitor connection cancellation to clean up dead connections
+                connection.stateUpdateHandler = { [weak self, weak connection] state in
+                    guard let self = self, let conn = connection else { return }
+                    switch state {
+                    case .cancelled, .failed(_):
+                        self.lock.lock()
+                        if let idx = self.waitingChannelConnections.firstIndex(where: { $0 === conn }) {
+                            self.waitingChannelConnections.remove(at: idx)
+                        }
+                        self.lock.unlock()
+                    default:
+                        break
+                    }
+                }
+
+                // Hold connection for long polling
+                self.waitingChannelConnections.append(connection)
+                self.lock.unlock()
+
+                // Schedule long-poll keep-alive timeout after 25 seconds
+                self.queue.asyncAfter(deadline: .now() + 25.0) { [weak self, weak connection] in
+                    guard let self = self, let conn = connection else { return }
+                    var wasRemoved = false
+                    self.lock.lock()
+                    if let idx = self.waitingChannelConnections.firstIndex(where: { $0 === conn }) {
+                        self.waitingChannelConnections.remove(at: idx)
+                        wasRemoved = true
+                    }
+                    self.lock.unlock()
+
+                    if wasRemoved {
+                        self.sendHTTPResponse(connection: conn, statusCode: 204, body: "")
+                    }
+                }
+            }
+            return
+        }
+
+        // Live Query Response: POST /api/query/response
+        if path == "/api/query/response" && method == "POST" {
+            if let headerEndRange = data.range(of: Data([0x0D, 0x0A, 0x0D, 0x0A])) {
+                let bodyData = data.subdata(in: headerEndRange.upperBound..<data.count)
+                do {
+                    let decoder = JSONDecoder()
+                    decoder.dateDecodingStrategy = .custom { d in
+                        let container = try d.singleValueContainer()
+                        let dateStr = try container.decode(String.self)
+                        let iso8601WithMillis = ISO8601DateFormatter()
+                        iso8601WithMillis.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                        if let date = iso8601WithMillis.date(from: dateStr) {
+                            return date
+                        }
+                        let iso8601Standard = ISO8601DateFormatter()
+                        iso8601Standard.formatOptions = [.withInternetDateTime]
+                        if let date = iso8601Standard.date(from: dateStr) {
+                            return date
+                        }
+                        return Date()
+                    }
+
+                    let queryResp = try decoder.decode(LiveQueryResponse.self, from: bodyData)
+                    ScreenSenseLogger.app.info("[SS-LIVEQUERY] Bridge received response requestId=\(queryResp.requestId, privacy: .public)")
+
+                    self.lock.lock()
+                    self._lastConnectedAt = Date()
+                    let continuation = self.pendingQueryContinuations.removeValue(forKey: queryResp.requestId)
+                    self.lock.unlock()
+
+                    if let cont = continuation {
+                        ScreenSenseLogger.app.info("[SS-LIVEQUERY] response matched requestId=\(queryResp.requestId, privacy: .public)")
+                        ScreenSenseLogger.app.info("[SS-LIVEQUERY] Continuation resumed requestId=\(queryResp.requestId, privacy: .public)")
+                        cont.resume(returning: queryResp)
+                    } else {
+                        ScreenSenseLogger.app.warning("[SS-LIVEQUERY] response received but NO pending request matched requestId=\(queryResp.requestId, privacy: .public)")
+                    }
+
+                    sendHTTPResponse(connection: connection, statusCode: 200, body: "{\"success\":true}")
+                    return
+                } catch {
+                    ScreenSenseLogger.app.error("[SS-LIVEQUERY] Failed to decode LiveQueryResponse: \(error.localizedDescription, privacy: .public)")
+                    sendHTTPResponse(connection: connection, statusCode: 400, body: "{\"error\":\"Invalid LiveQueryResponse\"}")
+                    return
+                }
+            }
         }
 
         if path == "/api/context" {
@@ -329,3 +589,4 @@ public final class LocalBrowserBridge: BrowserBridgeProtocol, @unchecked Sendabl
         }))
     }
 }
+

@@ -272,3 +272,229 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+// 5. Command-Time Live Query Bidirectional Channel
+let isQueryLoopRunning = false;
+
+async function postQueryResponse(responsePayload) {
+  try {
+    const res = await fetch(`${BRIDGE_URL}/api/query/response`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(responsePayload)
+    });
+    console.log(`[SS-LIVEQUERY] POST /api/query/response for reqId=${responsePayload.requestId} -> HTTP ${res.status}`);
+  } catch (err) {
+    console.debug(`[SS-LIVEQUERY] Failed to post query response for reqId=${responsePayload.requestId}:`, err.message);
+  }
+}
+
+async function handleLiveQuery(queryRequest) {
+  const reqId = queryRequest.requestId;
+  const qType = queryRequest.type;
+  console.log(`[SS-LIVEQUERY] Service worker received requestId=${reqId} type=${qType}`);
+
+  // 1. Identify currently active tab across focused or fallback windows
+  let activeTab = null;
+  try {
+    const tabsInLastFocused = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tabsInLastFocused && tabsInLastFocused.length > 0) {
+      activeTab = tabsInLastFocused[0];
+    }
+  } catch (e) {
+    // Ignore and fallback
+  }
+
+  if (!activeTab || !activeTab.id) {
+    try {
+      const tabsInCurrent = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabsInCurrent && tabsInCurrent.length > 0) {
+        activeTab = tabsInCurrent[0];
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  if (!activeTab || !activeTab.id) {
+    try {
+      const allActive = await chrome.tabs.query({ active: true });
+      if (allActive && allActive.length > 0) {
+        activeTab = allActive[0];
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  if (!activeTab || !activeTab.id) {
+    console.warn(`[SS-LIVEQUERY] No active tab found for reqId=${reqId}`);
+    await postQueryResponse({
+      requestId: reqId,
+      success: false,
+      status: 'NO_ACTIVE_CHROME_TAB',
+      error: 'No active Chrome tab found'
+    });
+    return;
+  }
+
+  console.log(`[SS-LIVEQUERY] Active tab resolved tabId=${activeTab.id} url=${activeTab.url || 'none'} title="${activeTab.title || ''}"`);
+
+  if (!activeTab.url || activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('chrome-extension://') || activeTab.url.startsWith('devtools://')) {
+    console.warn(`[SS-LIVEQUERY] Active tab is restricted page (${activeTab.url}) for reqId=${reqId}`);
+    await postQueryResponse({
+      requestId: reqId,
+      success: false,
+      status: 'NO_ACTIVE_CHROME_TAB',
+      error: `Cannot query restricted browser tab (${activeTab.url})`,
+      tabId: String(activeTab.id),
+      url: activeTab.url,
+      pageTitle: activeTab.title
+    });
+    return;
+  }
+
+  // 2. Map query type to action
+  let actionName = 'live_query_dom';
+  if (qType === 'active_pointer') actionName = 'live_query_pointer';
+  else if (qType === 'active_selection') actionName = 'live_query_selection';
+  else if (qType === 'active_tab') actionName = 'live_query_tab';
+  else if (qType === 'active_dom') actionName = 'live_query_dom';
+
+  console.log(`[SS-LIVEQUERY] Sending content message requestId=${reqId} action=${actionName}`);
+
+  // 3. Dispatch to content script of active tab with injection fallback
+  const sendQueryMessage = () => new Promise((resolve) => {
+    chrome.tabs.sendMessage(activeTab.id, { action: actionName, requestId: reqId, parameters: queryRequest.parameters }, async (response) => {
+      if (chrome.runtime.lastError || !response) {
+        const errMsg = chrome.runtime.lastError?.message || 'No response from content script';
+        console.warn(`[SS-LIVEQUERY] content script unavailable on tabId=${activeTab.id}: ${errMsg}`);
+        if (errMsg.includes('Receiving end does not exist') || errMsg.includes('Could not establish connection')) {
+          console.log(`[SS-LIVEQUERY] Content script missing in active tab ${activeTab.id}, injecting dynamically and retrying query...`);
+          const injected = await ensureContentScriptInjected(activeTab.id, activeTab.url);
+          if (injected) {
+            setTimeout(() => {
+              chrome.tabs.sendMessage(activeTab.id, { action: actionName, requestId: reqId, parameters: queryRequest.parameters }, (retryResponse) => {
+                if (chrome.runtime.lastError || !retryResponse) {
+                  const retryErr = chrome.runtime.lastError?.message || 'Retry failed';
+                  console.warn(`[SS-LIVEQUERY] Retry failed on tabId=${activeTab.id}: ${retryErr}`);
+                  resolve({ success: false, status: 'CONTENT_SCRIPT_UNAVAILABLE', error: retryErr });
+                } else {
+                  console.log(`[SS-LIVEQUERY] Retry succeeded on tabId=${activeTab.id} for reqId=${reqId}`);
+                  resolve(retryResponse);
+                }
+              });
+            }, 60);
+            return;
+          }
+        }
+        resolve({ success: false, status: 'CONTENT_SCRIPT_UNAVAILABLE', error: errMsg });
+        return;
+      }
+      resolve(response);
+    });
+  });
+
+  const tabResponse = await sendQueryMessage();
+  console.log(`[SS-LIVEQUERY] Content response received requestId=${reqId} status=${tabResponse.status || (tabResponse.success !== false ? 'OK' : 'FAILED')}`);
+
+  // 4. Verify tab didn't switch during query execution
+  try {
+    const [currentActive] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (currentActive && currentActive.id !== activeTab.id) {
+      console.warn(`[SS-LIVEQUERY] Tab changed during query execution (was ${activeTab.id}, now ${currentActive.id})`);
+      await postQueryResponse({
+        requestId: reqId,
+        success: false,
+        status: 'TAB_CHANGED_DURING_QUERY',
+        error: 'Active tab changed during query execution',
+        tabId: String(currentActive.id),
+        url: currentActive.url,
+        pageTitle: currentActive.title
+      });
+      return;
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  // 5. Package live query response
+  const queryResultPayload = {
+    requestId: reqId,
+    success: tabResponse.success !== false,
+    status: tabResponse.status || (tabResponse.success !== false ? 'OK' : 'LIVE_QUERY_FAILED'),
+    error: tabResponse.error || null,
+    tabId: String(activeTab.id),
+    url: activeTab.url || '',
+    pageTitle: activeTab.title || '',
+    viewport: tabResponse.viewport || tabResponse.context?.viewport || tabResponse.domResult?.viewport || null,
+    pointerResult: tabResponse.pointerResult || null,
+    selectionResult: tabResponse.selectionResult || null,
+    domResult: tabResponse.domResult || tabResponse.context || null,
+    timestamp: new Date().toISOString()
+  };
+
+  console.log(`[SS-LIVEQUERY] Sending response requestId=${reqId} status=${queryResultPayload.status}`);
+  await postQueryResponse(queryResultPayload);
+}
+
+async function listenForLiveQueries() {
+  if (isQueryLoopRunning) return;
+  isQueryLoopRunning = true;
+  console.log('[SS-LIVEQUERY] service worker initialized');
+  console.log('[SS-LIVEQUERY] starting pending-query listener');
+
+  while (isQueryLoopRunning) {
+    console.log('[SS-LIVEQUERY] waiting for pending query');
+    try {
+      const res = await fetch(`${BRIDGE_URL}/api/query/pending`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+
+      if (res.status === 200) {
+        const queryRequest = await res.json();
+        if (queryRequest && queryRequest.requestId) {
+          console.log(`[SS-LIVEQUERY] received pending request requestId=${queryRequest.requestId}`);
+          handleLiveQuery(queryRequest).catch((err) => {
+            console.error(`[SS-LIVEQUERY] Error processing query requestId=${queryRequest.requestId}:`, err);
+          });
+        }
+      } else if (res.status === 204) {
+        console.log('[SS-LIVEQUERY] Pending query keep-alive cycle completed (204 No Content), reconnecting...');
+      } else {
+        console.warn(`[SS-LIVEQUERY] Bridge returned HTTP ${res.status}, retrying in 1s...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    } catch (err) {
+      console.warn('[SS-LIVEQUERY] Pending query network error (bridge unreachable?):', err.message);
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+}
+
+// Hook into all lifecycle and wake-up events to guarantee listener is running
+chrome.runtime.onInstalled.addListener(() => {
+  console.log('[SS-LIVEQUERY] runtime.onInstalled triggered; ensuring listener is running');
+  listenForLiveQueries();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  console.log('[SS-LIVEQUERY] runtime.onStartup triggered; ensuring listener is running');
+  listenForLiveQueries();
+});
+
+chrome.tabs.onActivated.addListener(() => {
+  listenForLiveQueries();
+});
+
+chrome.windows.onFocusChanged.addListener(() => {
+  listenForLiveQueries();
+});
+
+// Start live query listener loop immediately on load
+listenForLiveQueries();
+

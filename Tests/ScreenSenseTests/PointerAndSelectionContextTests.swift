@@ -31,6 +31,48 @@ final class MockUnifiedContextManagerForPointerTest: UnifiedContextManagerProtoc
 
     func startMonitoring() {}
     func stopMonitoring() {}
+
+    func queryActiveTab(timeout: TimeInterval) async throws -> LiveQueryResponse {
+        LiveQueryResponse(requestId: "mock", success: true, tabId: "1", url: "https://example.com", pageTitle: context.activeTabTitle)
+    }
+
+    func queryActivePointer(timeout: TimeInterval) async throws -> LivePointerResult {
+        if let p = context.pointer {
+            let targetEl = context.elements.first(where: { el in
+                if let elId = p.elementId, el.id == elId { return true }
+                return p.x >= el.bounds.x && p.x <= el.bounds.x + el.bounds.width && p.y >= el.bounds.y && p.y <= el.bounds.y + el.bounds.height
+            }) ?? context.elements.first
+            return LivePointerResult(
+                status: "OK",
+                x: p.x,
+                y: p.y,
+                targetElement: targetEl.map { LiveTargetElement(id: $0.id, tag: $0.tag, text: $0.text, bounds: $0.bounds, type: $0.type.rawValue) },
+                containingText: targetEl?.text,
+                containingParagraph: targetEl?.text
+            )
+        }
+        throw LiveQueryError.pointerUnavailable
+    }
+
+    func queryActiveSelection(timeout: TimeInterval) async throws -> LiveSelectionResult {
+        if let s = context.selection {
+            return LiveSelectionResult(
+                status: "OK",
+                text: s.text,
+                isCollapsed: false,
+                bounds: s.bounds,
+                containingElementId: s.containingElementId,
+                containingText: s.text,
+                containingSentence: s.text,
+                containingParagraph: s.text
+            )
+        }
+        return LiveSelectionResult(status: "NO_ACTIVE_SELECTION", text: "", isCollapsed: true)
+    }
+
+    func queryActiveDOM(timeout: TimeInterval) async throws -> VisibleContext {
+        VisibleContext(source: .dom, viewport: ViewportInfo(width: 1200, height: 800), elements: context.elements)
+    }
 }
 
 final class PointerAndSelectionContextTests: XCTestCase {

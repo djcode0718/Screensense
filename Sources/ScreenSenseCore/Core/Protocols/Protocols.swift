@@ -81,6 +81,12 @@ public protocol BrowserBridgeProtocol: AnyObject, Sendable {
     var latestDOMContext: VisibleContext? { get }
     var isConnected: Bool { get }
     var onContextReceived: (@Sendable (VisibleContext) -> Void)? { get set }
+
+    /// Command-time live queries
+    func queryActiveTab(timeout: TimeInterval) async throws -> LiveQueryResponse
+    func queryActivePointer(timeout: TimeInterval) async throws -> LivePointerResult
+    func queryActiveSelection(timeout: TimeInterval) async throws -> LiveSelectionResult
+    func queryActiveDOM(timeout: TimeInterval) async throws -> VisibleContext
 }
 
 /// Protocol for managing and checking macOS permissions

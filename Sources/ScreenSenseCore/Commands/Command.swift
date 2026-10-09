@@ -432,6 +432,120 @@ public struct GenericCopyAction: Command, Equatable, Sendable {
     }
 
     public func execute(context: CommandExecutionContext) async throws -> CommandExecutionResult {
+        let isChrome = (context.unifiedContextManager?.currentApplicationName.contains("Chrome") == true) ||
+                       (context.unifiedContextManager?.currentApplicationName.contains("Chromium") == true) ||
+                       (context.unifiedContextManager?.isBridgeConnected == true)
+
+        // 1. LIVE POINTER QUERY: Authoritative command-time query for pointer targets in Chrome
+        if case .pointerContext(let rel, let scope) = intent.target, isChrome, let mgr = context.unifiedContextManager {
+            do {
+                let pointerRes = try await mgr.queryActivePointer(timeout: 0.8)
+                ScreenSenseLogger.app.info("[SS-LIVEQUERY] GenericCopyAction received result status=\(pointerRes.status, privacy: .public)")
+
+                if pointerRes.status == "POINTER_UNAVAILABLE" {
+                    return CommandExecutionResult(
+                        success: false,
+                        message: "Pointer position is unavailable in active Chrome tab."
+                    )
+                }
+                if pointerRes.status == "ELEMENT_NOT_FOUND" {
+                    return CommandExecutionResult(
+                        success: false,
+                        message: "No content found under the cursor."
+                    )
+                }
+
+                let textToCopy: String?
+                switch scope {
+                case .paragraph:
+                    textToCopy = pointerRes.containingParagraph ?? pointerRes.containingText ?? pointerRes.targetElement?.text
+                case .heading:
+                    textToCopy = pointerRes.containingHeading ?? pointerRes.targetElement?.text
+                case .text, .all, .none:
+                    textToCopy = pointerRes.containingText ?? pointerRes.targetElement?.text
+                }
+
+                if let text = textToCopy?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                    if context.clipboardManager.setString(text) {
+                        let preview = text.count > 40 ? "\(text.prefix(40))..." : text
+                        let scopeNoun = (scope == .paragraph) ? "paragraph" : ((scope == .heading) ? "heading" : "text")
+                        return CommandExecutionResult(
+                            success: true,
+                            message: "Copied \(scopeNoun) \(rel.rawValue) cursor to clipboard: \"\(preview)\""
+                        )
+                    } else {
+                        return CommandExecutionResult(success: false, message: "Failed to set clipboard content")
+                    }
+                } else {
+                    return CommandExecutionResult(
+                        success: false,
+                        message: "No text found under the cursor."
+                    )
+                }
+            } catch let liveErr as LiveQueryError {
+                ScreenSenseLogger.app.error("[SS-LIVEQUERY] Pointer query failed: \(liveErr.localizedDescription, privacy: .public)")
+                return CommandExecutionResult(success: false, message: liveErr.localizedDescription)
+            } catch {
+                ScreenSenseLogger.app.error("[SS-LIVEQUERY] Pointer query error: \(error.localizedDescription, privacy: .public)")
+                return CommandExecutionResult(success: false, message: "Pointer query failed: \(error.localizedDescription)")
+            }
+        }
+
+        // 2. LIVE SELECTION QUERY: Authoritative command-time query for selection targets in Chrome
+        if case .selection(let scope) = intent.target, isChrome, let mgr = context.unifiedContextManager {
+            do {
+                let selectionRes = try await mgr.queryActiveSelection(timeout: 0.8)
+                ScreenSenseLogger.app.info("[SS-LIVEQUERY] GenericCopyAction received result status=\(selectionRes.status, privacy: .public)")
+
+                if selectionRes.status == "NO_ACTIVE_SELECTION" || selectionRes.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return CommandExecutionResult(
+                        success: false,
+                        message: "No text currently selected in the active Chrome tab."
+                    )
+                }
+
+                let textToCopy: String
+                switch scope {
+                case .exact:
+                    textToCopy = selectionRes.text
+                case .sentence:
+                    textToCopy = selectionRes.containingSentence ?? selectionRes.text
+                case .paragraph:
+                    textToCopy = selectionRes.containingParagraph ?? selectionRes.containingText ?? selectionRes.text
+                case .textRegion:
+                    textToCopy = selectionRes.containingText ?? selectionRes.text
+                }
+
+                let trimmed = textToCopy.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    if context.clipboardManager.setString(trimmed) {
+                        let preview = trimmed.count > 40 ? "\(trimmed.prefix(40))..." : trimmed
+                        let msg: String
+                        switch scope {
+                        case .exact:
+                            msg = "Copied selected text to clipboard: \"\(preview)\""
+                        case .paragraph:
+                            msg = "Copied containing paragraph to clipboard: \"\(preview)\""
+                        case .sentence:
+                            msg = "Copied containing sentence to clipboard: \"\(preview)\""
+                        case .textRegion:
+                            msg = "Copied containing text to clipboard: \"\(preview)\""
+                        }
+                        return CommandExecutionResult(success: true, message: msg)
+                    } else {
+                        return CommandExecutionResult(success: false, message: "Failed to set clipboard content")
+                    }
+                }
+            } catch let liveErr as LiveQueryError {
+                ScreenSenseLogger.app.error("[SS-LIVEQUERY] Selection query failed: \(liveErr.localizedDescription, privacy: .public)")
+                return CommandExecutionResult(success: false, message: liveErr.localizedDescription)
+            } catch {
+                ScreenSenseLogger.app.error("[SS-LIVEQUERY] Selection query error: \(error.localizedDescription, privacy: .public)")
+                return CommandExecutionResult(success: false, message: "Selection query failed: \(error.localizedDescription)")
+            }
+        }
+
+        // 3. LIVE DOM REFRESH OR CACHED CONTEXT RESOLUTION
         let unifiedContext: UnifiedContext
         if let mgr = context.unifiedContextManager {
             unifiedContext = await mgr.getUnifiedContext()

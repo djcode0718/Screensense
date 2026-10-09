@@ -238,6 +238,190 @@ class DOMAnalyzer {
       }
     };
   }
+
+  /**
+   * Command-time Live Pointer query: inspects the element under coordinates (x, y)
+   * and computes containing meaningful text containers, paragraph, heading, and section.
+   * @param {number} x
+   * @param {number} y
+   * @returns {Object}
+   */
+  static getElementAtPoint(x, y) {
+    if (typeof document === 'undefined' || !document.elementFromPoint) {
+      return { status: 'POINTER_UNAVAILABLE', x, y };
+    }
+    if (typeof x !== 'number' || typeof y !== 'number' || isNaN(x) || isNaN(y)) {
+      return { status: 'POINTER_UNAVAILABLE', x: 0, y: 0 };
+    }
+
+    console.log(`[SS-LIVEQUERY] pointer:\nx=${x}\ny=${y}`);
+
+    const target = document.elementFromPoint(x, y);
+    if (!target) {
+      console.log(`[SS-LIVEQUERY] elementFromPoint: null (ELEMENT_NOT_FOUND)`);
+      return { status: 'ELEMENT_NOT_FOUND', x, y };
+    }
+
+    const cleanTargetText = this.getCleanText(target);
+    console.log(`[SS-LIVEQUERY] elementFromPoint:\ntag=${target.tagName.toLowerCase()}\ntextPreview=${cleanTargetText.slice(0, 60)}`);
+
+    const rect = target.getBoundingClientRect();
+    const bounds = {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+
+    const type = this.getElementType(target);
+    let selector = target.tagName.toLowerCase();
+    if (target.id && typeof target.id === 'string') {
+      selector = `#${target.id}`;
+    } else if (typeof target.className === 'string' && target.className.trim()) {
+      const classNames = target.className.trim().split(/\s+/).filter(Boolean);
+      if (classNames.length > 0) {
+        selector = `.${classNames.join('.')}`;
+      }
+    }
+
+    // Containing paragraph or block-level text container
+    let containingParagraph = null;
+    const paragraphAncestor = target.closest('p, blockquote, li, pre, dd, dt');
+    if (paragraphAncestor) {
+      containingParagraph = this.getCleanText(paragraphAncestor);
+    } else {
+      // Look for block container div or section with reasonable text length
+      let curr = target.parentElement;
+      while (curr && curr !== document.body && curr !== document.documentElement) {
+        const display = (typeof window !== 'undefined' && window.getComputedStyle) ? window.getComputedStyle(curr).display : '';
+        if (display === 'block' || display === 'flex' || display === 'grid' || curr.tagName.toLowerCase() === 'div') {
+          const txt = this.getCleanText(curr);
+          if (txt.length > 0 && txt.length <= 1500) {
+            containingParagraph = txt;
+            break;
+          }
+        }
+        curr = curr.parentElement;
+      }
+    }
+
+    // Containing or nearest heading
+    let containingHeading = null;
+    const headingAncestor = target.closest('h1, h2, h3, h4, h5, h6, [role="heading"]');
+    if (headingAncestor) {
+      containingHeading = this.getCleanText(headingAncestor);
+    }
+
+    // Containing section
+    let containingSection = null;
+    const sectionAncestor = target.closest('section, article, main, nav, [role="region"], [role="article"]');
+    if (sectionAncestor) {
+      containingSection = this.getCleanText(sectionAncestor);
+    }
+
+    const containingText = containingParagraph || cleanTargetText;
+    console.log(`[SS-LIVEQUERY] containing target:\ntype=${type}\ntextLength=${(containingText || cleanTargetText).length}`);
+
+    return {
+      status: 'OK',
+      x: x,
+      y: y,
+      targetElement: {
+        id: target.id || null,
+        tag: target.tagName.toLowerCase(),
+        text: cleanTargetText,
+        bounds: bounds,
+        type: type,
+        selector: selector
+      },
+      containingText: containingText || cleanTargetText,
+      containingParagraph: containingParagraph || cleanTargetText,
+      containingHeading: containingHeading,
+      containingSection: containingSection
+    };
+  }
+
+  /**
+   * Command-time Live Selection query: inspects window.getSelection() at command execution time.
+   * Deterministically returns exact selection or NO_ACTIVE_SELECTION.
+   * @returns {Object}
+   */
+  static getActiveSelectionDetails() {
+    if (typeof window === 'undefined' || !window.getSelection) {
+      return { status: 'NO_ACTIVE_SELECTION', text: '', isCollapsed: true };
+    }
+
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      return { status: 'NO_ACTIVE_SELECTION', text: '', isCollapsed: true };
+    }
+
+    const selectedText = sel.toString().trim();
+    if (selectedText.length === 0) {
+      return { status: 'NO_ACTIVE_SELECTION', text: '', isCollapsed: true };
+    }
+
+    let bounds = null;
+    let containingElementId = null;
+    let containingParagraph = null;
+    let containingSentence = null;
+    let containingText = selectedText;
+
+    if (sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect) {
+        bounds = {
+          x: Math.round(rect.left),
+          y: Math.round(rect.top),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        };
+      }
+
+      let ancestor = range.commonAncestorContainer;
+      if (ancestor && ancestor.nodeType === 3) {
+        ancestor = ancestor.parentElement;
+      }
+
+      if (ancestor) {
+        containingElementId = ancestor.id || null;
+        const blockContainer = ancestor.closest ? ancestor.closest('p, blockquote, li, pre, dd, dt, h1, h2, h3, h4, h5, h6, article, div') : ancestor;
+        const fullBlockText = blockContainer ? this.getCleanText(blockContainer) : this.getCleanText(ancestor);
+        
+        if (fullBlockText) {
+          containingText = fullBlockText;
+          containingParagraph = fullBlockText;
+
+          // Extract containing sentence
+          // Split fullBlockText into sentences preserving boundaries
+          const sentenceRegex = /[^.!?]+[.!?]+|\S[^.!?]*$/g;
+          const sentences = fullBlockText.match(sentenceRegex) || [fullBlockText];
+          for (const s of sentences) {
+            const trimmedS = s.trim();
+            if (trimmedS.includes(selectedText) || selectedText.includes(trimmedS)) {
+              containingSentence = trimmedS;
+              break;
+            }
+          }
+          if (!containingSentence) {
+            containingSentence = selectedText;
+          }
+        }
+      }
+    }
+
+    return {
+      status: 'OK',
+      text: selectedText,
+      isCollapsed: false,
+      bounds: bounds,
+      containingElementId: containingElementId,
+      containingText: containingText,
+      containingSentence: containingSentence || selectedText,
+      containingParagraph: containingParagraph || selectedText
+    };
+  }
 }
 
 // Expose globally for content scripts and test environments

@@ -17,6 +17,12 @@ public protocol UnifiedContextManagerProtocol: AnyObject, Sendable {
     func refreshContext() async -> UnifiedContext
     func startMonitoring()
     func stopMonitoring()
+
+    /// Live Command-Time Queries
+    func queryActiveTab(timeout: TimeInterval) async throws -> LiveQueryResponse
+    func queryActivePointer(timeout: TimeInterval) async throws -> LivePointerResult
+    func queryActiveSelection(timeout: TimeInterval) async throws -> LiveSelectionResult
+    func queryActiveDOM(timeout: TimeInterval) async throws -> VisibleContext
 }
 
 /// Central manager orchestrating multi-source context acquisition, freshness, and automatic synchronization
@@ -279,5 +285,23 @@ public final class UnifiedContextManager: UnifiedContextManagerProtocol, @unchec
         Task {
             _ = await self.refreshContext()
         }
+    }
+
+    // MARK: - Live Query Delegation
+
+    public func queryActiveTab(timeout: TimeInterval = 0.5) async throws -> LiveQueryResponse {
+        try await browserBridge.queryActiveTab(timeout: timeout)
+    }
+
+    public func queryActivePointer(timeout: TimeInterval = 0.5) async throws -> LivePointerResult {
+        try await browserBridge.queryActivePointer(timeout: timeout)
+    }
+
+    public func queryActiveSelection(timeout: TimeInterval = 0.5) async throws -> LiveSelectionResult {
+        try await browserBridge.queryActiveSelection(timeout: timeout)
+    }
+
+    public func queryActiveDOM(timeout: TimeInterval = 1.0) async throws -> VisibleContext {
+        try await browserBridge.queryActiveDOM(timeout: timeout)
     }
 }

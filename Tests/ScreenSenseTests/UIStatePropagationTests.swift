@@ -9,7 +9,24 @@ final class UIStateMockBrowserBridge: BrowserBridgeProtocol, @unchecked Sendable
 
     func start() throws {}
     func stop() {}
-    func broadcastMessage(_ message: [String: Any]) {}
+    func queryActiveTab(timeout: TimeInterval) async throws -> LiveQueryResponse {
+        LiveQueryResponse(requestId: "mock", success: true, tabId: "101", url: "https://example.com", pageTitle: "Mock")
+    }
+
+    func queryActivePointer(timeout: TimeInterval) async throws -> LivePointerResult {
+        LivePointerResult(status: "OK", x: 100, y: 100, containingText: "Mock Pointer")
+    }
+
+    func queryActiveSelection(timeout: TimeInterval) async throws -> LiveSelectionResult {
+        LiveSelectionResult(status: "OK", text: "Mock Selection")
+    }
+
+    func queryActiveDOM(timeout: TimeInterval) async throws -> VisibleContext {
+        guard let dom = latestDOMContext else {
+            throw LiveQueryError.liveQueryFailed("No DOM")
+        }
+        return dom
+    }
 
     func simulateDOMArrival(_ context: VisibleContext) {
         self.latestDOMContext = context

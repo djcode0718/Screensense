@@ -14,6 +14,29 @@ final class MockBrowserBridge: BrowserBridgeProtocol, @unchecked Sendable {
     func start() throws {}
     func stop() {}
 
+    var stubbedPointerResult: LivePointerResult?
+    var stubbedSelectionResult: LiveSelectionResult?
+    var stubbedTabResponse: LiveQueryResponse?
+
+    func queryActiveTab(timeout: TimeInterval) async throws -> LiveQueryResponse {
+        stubbedTabResponse ?? LiveQueryResponse(requestId: "mock", success: true, tabId: "1", url: "https://example.com", pageTitle: "Mock Page")
+    }
+
+    func queryActivePointer(timeout: TimeInterval) async throws -> LivePointerResult {
+        stubbedPointerResult ?? LivePointerResult(status: "OK", x: 100, y: 100, containingText: "Mock Pointer Text")
+    }
+
+    func queryActiveSelection(timeout: TimeInterval) async throws -> LiveSelectionResult {
+        stubbedSelectionResult ?? LiveSelectionResult(status: "OK", text: "Mock Selection Text")
+    }
+
+    func queryActiveDOM(timeout: TimeInterval) async throws -> VisibleContext {
+        guard let dom = _latestDOM else {
+            throw LiveQueryError.liveQueryFailed("No DOM")
+        }
+        return dom
+    }
+
     func simulateContextUpdate(_ context: VisibleContext) {
         self._latestDOM = context
         self._isConnected = true
